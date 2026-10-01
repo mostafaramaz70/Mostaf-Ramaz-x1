@@ -7,6 +7,7 @@ Status: Ready For Build
 
 from typing import Dict, Any, Optional
 from datetime import datetime
+from memory.memory_engine import MemoryEngine
 
 
 class TechNDS01:
@@ -58,16 +59,19 @@ class TechNDS01:
 
     def __init__(self):
         self.identity = self.IDENTITY.copy()
-        self.memory = []
-        self.experience = []
-        self.knowledge = []
-        self.discoveries = []
+        self.memory_engine = MemoryEngine(agent_id=self.identity["agent_id"])
 
     def analyze(self, mission_input: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute independent NDS analysis.
         Returns structured output.
         """
+        # Store input in working memory
+        self.memory_engine.add_working(
+            content=mission_input,
+            meta={"type": "mission_input"}
+        )
+
         result = {
             "agent_id": self.identity["agent_id"],
             "mission_id": mission_input.get("mission_id"),
@@ -88,6 +92,13 @@ class TechNDS01:
             "status": "COMPLETED",
             "timestamp": datetime.utcnow().isoformat()
         }
+
+        # Store result in mission history
+        self.memory_engine.add_mission_history(
+            mission_id=mission_input.get("mission_id", "UNKNOWN"),
+            result=result
+        )
+
         return result
 
     def generate_report(self, analysis_result: Dict[str, Any]) -> Dict[str, Any]:
