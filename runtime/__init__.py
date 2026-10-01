@@ -15,6 +15,7 @@ from runtime.scheduler import Scheduler
 from runtime.context import RuntimeContext
 from runtime.config import RuntimeConfig
 from runtime.flow import MissionFlow
+from runtime.agents_setup import setup_blueprint_agents
 from runtime import nodes
 
 __all__ = [
@@ -32,5 +33,6 @@ __all__ = [
     "RuntimeContext",
     "RuntimeConfig",
     "MissionFlow",
+    "setup_blueprint_agents",
     "nodes",
 ]
