@@ -3,6 +3,13 @@ Ramaz X1 Backend - FastAPI
 Version: 1.0.0
 """
 
+import sys
+from pathlib import Path
+
+# Add project root to path so runtime can be imported
+ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT_DIR))
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
