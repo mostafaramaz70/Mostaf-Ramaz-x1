@@ -14,6 +14,8 @@ def entry_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """Entry node - receive mission."""
     state["current_node"] = "entry"
     state["mission_status"] = MissionStatus.CREATED.name
+    if "timestamps" not in state:
+        state["timestamps"] = {}
     state["timestamps"]["entry"] = datetime.utcnow().isoformat()
     return state
 
@@ -31,6 +33,9 @@ def planning_node(state: Dict[str, Any]) -> Dict[str, Any]:
     state["current_node"] = "planning"
     state["mission_status"] = MissionStatus.PLANNING.name
     state["timestamps"]["planning"] = datetime.utcnow().isoformat()
+    # Default: route to Technical department for NDS analysis
+    state["required_departments"] = ["Technical"]
+    state["active_employees"] = ["TECH-NDS-01"]
     return state
 
 
@@ -39,6 +44,7 @@ def routing_node(state: Dict[str, Any]) -> Dict[str, Any]:
     state["current_node"] = "routing"
     state["mission_status"] = MissionStatus.ROUTING.name
     state["timestamps"]["routing"] = datetime.utcnow().isoformat()
+    state["active_managers"] = ["TECH-MANAGER"]
     return state
 
 
@@ -51,9 +57,42 @@ def manager_coordination_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def employee_execution_node(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Employee execution node."""
+    """Employee execution node - runs TECH-NDS-01."""
     state["current_node"] = "employee_execution"
     state["timestamps"]["employee_execution"] = datetime.utcnow().isoformat()
+
+    # Execute TECH-NDS-01 if assigned
+    active_employees = state.get("active_employees", [])
+    if "TECH-NDS-01" in active_employees:
+        try:
+            from agents.technical.workers.tech_nds_01 import TechNDS01
+
+            agent = TechNDS01()
+            mission_input = {
+                "mission_id": state.get("mission_id"),
+                "objective": state.get("mission_objective"),
+                "input": state.get("mission_input", {})
+            }
+            analysis_result = agent.analyze(mission_input)
+            report = agent.generate_report(analysis_result)
+            submission = agent.submit_to_manager(report)
+
+            if "agent_outputs" not in state:
+                state["agent_outputs"] = {}
+            state["agent_outputs"]["TECH-NDS-01"] = {
+                "analysis": analysis_result,
+                "report": report,
+                "submission": submission
+            }
+        except Exception as e:
+            if "errors" not in state:
+                state["errors"] = []
+            state["errors"].append({
+                "agent_id": "TECH-NDS-01",
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            })
+
     return state
 
 
@@ -78,6 +117,14 @@ def report_generation_node(state: Dict[str, Any]) -> Dict[str, Any]:
     state["current_node"] = "report_generation"
     state["mission_status"] = MissionStatus.REPORTING.name
     state["timestamps"]["report_generation"] = datetime.utcnow().isoformat()
+
+    # Collect agent reports
+    agent_outputs = state.get("agent_outputs", {})
+    reports = []
+    for agent_id, output in agent_outputs.items():
+        if "report" in output:
+            reports.append(output["report"])
+    state["reports"] = reports
     return state
 
 
