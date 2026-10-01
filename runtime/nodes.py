@@ -61,7 +61,6 @@ def employee_execution_node(state: Dict[str, Any]) -> Dict[str, Any]:
     state["current_node"] = "employee_execution"
     state["timestamps"]["employee_execution"] = datetime.utcnow().isoformat()
 
-    # Execute TECH-NDS-01 if assigned
     active_employees = state.get("active_employees", [])
     if "TECH-NDS-01" in active_employees:
         try:
@@ -97,10 +96,42 @@ def employee_execution_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def output_collection_node(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Collect outputs from employees."""
+    """Collect outputs from employees and process via TECH-MANAGER."""
     state["current_node"] = "output_collection"
     state["mission_status"] = MissionStatus.REVIEWING.name
     state["timestamps"]["output_collection"] = datetime.utcnow().isoformat()
+
+    # TECH-MANAGER receives employee reports and aggregates
+    agent_outputs = state.get("agent_outputs", {})
+    if "TECH-NDS-01" in agent_outputs:
+        try:
+            from agents.technical.manager.tech_manager import TechManager
+
+            manager = TechManager()
+            employee_report = agent_outputs["TECH-NDS-01"].get("report", {})
+            manager.receive_report(employee_report)
+
+            aggregated = manager.aggregate()
+            dept_report = manager.generate_department_report(
+                aggregated=aggregated,
+                mission_id=state.get("mission_id", "UNKNOWN")
+            )
+            submission = manager.submit_to_assistant(dept_report)
+
+            state["agent_outputs"]["TECH-MANAGER"] = {
+                "aggregated": aggregated,
+                "department_report": dept_report,
+                "submission": submission
+            }
+        except Exception as e:
+            if "errors" not in state:
+                state["errors"] = []
+            state["errors"].append({
+                "agent_id": "TECH-MANAGER",
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            })
+
     return state
 
 
@@ -118,12 +149,20 @@ def report_generation_node(state: Dict[str, Any]) -> Dict[str, Any]:
     state["mission_status"] = MissionStatus.REPORTING.name
     state["timestamps"]["report_generation"] = datetime.utcnow().isoformat()
 
-    # Collect agent reports
     agent_outputs = state.get("agent_outputs", {})
     reports = []
+
+    # Prefer department report from manager
+    if "TECH-MANAGER" in agent_outputs:
+        dept_report = agent_outputs["TECH-MANAGER"].get("department_report")
+        if dept_report:
+            reports.append(dept_report)
+
+    # Also keep employee reports
     for agent_id, output in agent_outputs.items():
-        if "report" in output:
+        if agent_id != "TECH-MANAGER" and "report" in output:
             reports.append(output["report"])
+
     state["reports"] = reports
     return state
 
