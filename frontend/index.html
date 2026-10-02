@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ramaz X1 — Dashboard</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="brand">
+        <span class="logo">R</span>
+        <div>
+          <h1>Ramaz X1</h1>
+          <p>AI Trading Operating System</p>
+        </div>
+      </div>
+      <div class="status-badge" id="systemStatus">در حال بارگذاری...</div>
+    </header>
+
+    <main class="grid">
+      <!-- System -->
+      <section class="card">
+        <h2>وضعیت سیستم</h2>
+        <div id="systemInfo" class="info-list">
+          <p>در حال اتصال به Backend...</p>
+        </div>
+        <button class="btn" onclick="loadSystem()">بروزرسانی</button>
+      </section>
+
+      <!-- Agents -->
+      <section class="card">
+        <h2>Agentها</h2>
+        <div id="agentsList" class="agents">
+          <p>در حال بارگذاری...</p>
+        </div>
+        <button class="btn" onclick="loadAgents()">بروزرسانی</button>
+      </section>
+
+      <!-- New Mission -->
+      <section class="card wide">
+        <h2>ارسال Mission جدید</h2>
+        <form id="missionForm" onsubmit="runMission(event)">
+          <label>هدف Mission</label>
+          <input type="text" id="objective" placeholder="مثلاً: تحلیل تکنیکال NDS روی EURUSD" required />
+
+          <label>نماد (Symbol)</label>
+          <input type="text" id="symbol" placeholder="EURUSD" value="EURUSD" />
+
+          <label>اولویت</label>
+          <select id="priority">
+            <option value="LOW">LOW</option>
+            <option value="MEDIUM" selected>MEDIUM</option>
+            <option value="HIGH">HIGH</option>
+            <option value="CRITICAL">CRITICAL</option>
+          </select>
+
+          <button type="submit" class="btn primary">اجرای Mission</button>
+        </form>
+      </section>
+
+      <!-- Mission Result -->
+      <section class="card wide">
+        <h2>نتیجه آخرین Mission</h2>
+        <pre id="missionResult" class="result">هنوز Mission اجرا نشده است.</pre>
+      </section>
+
+      <!-- Missions List -->
+      <section class="card wide">
+        <h2>لیست Missionها</h2>
+        <div id="missionsList" class="missions">
+          <p>در حال بارگذاری...</p>
+        </div>
+        <button class="btn" onclick="loadMissions()">بروزرسانی</button>
+      </section>
+    </main>
+
+    <footer class="footer">
+      Ramaz X1 v1.0 — Multi-Agent AI Organization
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
