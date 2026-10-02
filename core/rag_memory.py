@@ -1,101 +1,59 @@
 """
 Ramaz X1 RAG Memory Brain
-Version: 1.0.0
+Version: 2.0.0
 
-Goal:
-- Store Training / Experience / Discoveries as retrievable memory units
-- Avoid reloading full history into every model call
-- New connected models reuse the same memory brain
-- Human-like recall: retrieve only relevant fragments
-
-Design:
-1) Memory units are chunked and indexed
-2) Query retrieves top-k relevant units
-3) Only those units are injected into model context
-4) Vector backend is pluggable (local hash baseline now, FAISS/Chroma later)
+Upgrades:
+- Persistent SQLite storage
+- Pluggable embeddings (local hash default, OpenAI optional)
+- Chunking for long documents
+- Top-k retrieval for token-efficient prompts
 """
 
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
+from pathlib import Path
+import json
+import sqlite3
 import uuid
-import math
-import re
 
-
-def _tokenize(text: str) -> List[str]:
-    text = (text or "").lower()
-    return re.findall(r"[\w\u0600-\u06FF]+", text)
-
-
-def _bow_vector(tokens: List[str]) -> Dict[str, float]:
-    vec: Dict[str, float] = {}
-    for t in tokens:
-        vec[t] = vec.get(t, 0.0) + 1.0
-    # l2 normalize
-    norm = math.sqrt(sum(v * v for v in vec.values())) or 1.0
-    return {k: v / norm for k, v in vec.items()}
-
-
-def _cosine(a: Dict[str, float], b: Dict[str, float]) -> float:
-    if not a or not b:
-        return 0.0
-    # iterate smaller
-    if len(a) > len(b):
-        a, b = b, a
-    score = 0.0
-    for k, v in a.items():
-        if k in b:
-            score += v * b[k]
-    return score
-
-
-class MemoryUnit:
-    def __init__(
-        self,
-        agent_id: str,
-        kind: str,
-        content: str,
-        title: str = "",
-        meta: Optional[Dict[str, Any]] = None,
-        source_id: Optional[str] = None,
-    ):
-        self.id = f"MEM-{uuid.uuid4().hex[:10].upper()}"
-        self.agent_id = agent_id
-        self.kind = kind  # training | experience | discovery | working
-        self.title = title
-        self.content = content
-        self.meta = meta or {}
-        self.source_id = source_id
-        self.created_at = datetime.utcnow().isoformat()
-        tokens = _tokenize(f"{title} {content}")
-        self.vector = _bow_vector(tokens)
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "id": self.id,
-            "agent_id": self.agent_id,
-            "kind": self.kind,
-            "title": self.title,
-            "content": self.content,
-            "meta": self.meta,
-            "source_id": self.source_id,
-            "created_at": self.created_at,
-        }
+from core.chunking import chunk_text
+from core.embeddings import get_embedder, cosine_similarity
 
 
 class RAGMemoryBrain:
-    """
-    Per-agent memory brain.
-
-    Why this saves tokens:
-    - Model does not read all memories every time
-    - Only top-k relevant units are retrieved
-    - Switching model does not require re-ingesting history
-    """
-
-    def __init__(self, agent_id: str):
+    def __init__(self, agent_id: str, db_path: Optional[str] = None, embedder_provider: Optional[str] = None):
         self.agent_id = agent_id
-        self.units: Dict[str, MemoryUnit] = {}
+        root = Path(__file__).resolve().parent.parent / "data" / "rag"
+        root.mkdir(parents=True, exist_ok=True)
+        self.db_path = db_path or str(root / f"{agent_id}.sqlite3")
+        self.embedder = get_embedder(embedder_provider)
+        self._init_db()
+
+    def _connect(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS memory_units (
+                    id TEXT PRIMARY KEY,
+                    agent_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    title TEXT,
+                    content TEXT NOT NULL,
+                    meta_json TEXT,
+                    source_id TEXT,
+                    chunk_index INTEGER DEFAULT 0,
+                    embedding_json TEXT,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_mem_agent_kind ON memory_units(agent_id, kind)")
+            conn.commit()
 
     def upsert(
         self,
@@ -104,26 +62,90 @@ class RAGMemoryBrain:
         title: str = "",
         meta: Optional[Dict[str, Any]] = None,
         source_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        unit = MemoryUnit(
-            agent_id=self.agent_id,
-            kind=kind,
-            content=content,
-            title=title,
-            meta=meta,
-            source_id=source_id,
-        )
-        self.units[unit.id] = unit
-        return unit.to_dict()
+        chunk_size: int = 800,
+        overlap: int = 120,
+    ) -> List[Dict[str, Any]]:
+        """
+        Store one logical document as one or more chunked memory units.
+        Returns list of stored units.
+        """
+        chunks = chunk_text(content, chunk_size=chunk_size, overlap=overlap)
+        if not chunks:
+            return []
+
+        stored: List[Dict[str, Any]] = []
+        with self._connect() as conn:
+            for ch in chunks:
+                unit_id = f"MEM-{uuid.uuid4().hex[:10].upper()}"
+                emb = self.embedder.embed(f"{title}\n{ch['content']}")
+                created_at = datetime.utcnow().isoformat()
+                conn.execute(
+                    """
+                    INSERT INTO memory_units
+                    (id, agent_id, kind, title, content, meta_json, source_id, chunk_index, embedding_json, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        unit_id,
+                        self.agent_id,
+                        kind,
+                        title,
+                        ch["content"],
+                        json.dumps(meta or {}, ensure_ascii=False),
+                        source_id,
+                        int(ch["index"]),
+                        json.dumps(emb),
+                        created_at,
+                    ),
+                )
+                stored.append({
+                    "id": unit_id,
+                    "agent_id": self.agent_id,
+                    "kind": kind,
+                    "title": title,
+                    "content": ch["content"],
+                    "meta": meta or {},
+                    "source_id": source_id,
+                    "chunk_index": ch["index"],
+                    "created_at": created_at,
+                })
+            conn.commit()
+        return stored
 
     def delete(self, unit_id: str) -> bool:
-        return self.units.pop(unit_id, None) is not None
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM memory_units WHERE id = ? AND agent_id = ?", (unit_id, self.agent_id))
+            conn.commit()
+            return cur.rowcount > 0
 
     def list_units(self, kind: Optional[str] = None) -> List[Dict[str, Any]]:
-        items = list(self.units.values())
-        if kind:
-            items = [u for u in items if u.kind == kind]
-        return [u.to_dict() for u in items]
+        with self._connect() as conn:
+            if kind:
+                rows = conn.execute(
+                    "SELECT * FROM memory_units WHERE agent_id = ? AND kind = ? ORDER BY created_at DESC",
+                    (self.agent_id, kind),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM memory_units WHERE agent_id = ? ORDER BY created_at DESC",
+                    (self.agent_id,),
+                ).fetchall()
+
+        return [self._row_to_unit(r) for r in rows]
+
+    def _row_to_unit(self, row: sqlite3.Row) -> Dict[str, Any]:
+        return {
+            "id": row["id"],
+            "agent_id": row["agent_id"],
+            "kind": row["kind"],
+            "title": row["title"],
+            "content": row["content"],
+            "meta": json.loads(row["meta_json"] or "{}"),
+            "source_id": row["source_id"],
+            "chunk_index": row["chunk_index"],
+            "created_at": row["created_at"],
+            "embedding": json.loads(row["embedding_json"] or "[]"),
+        }
 
     def retrieve(
         self,
@@ -132,28 +154,34 @@ class RAGMemoryBrain:
         kinds: Optional[List[str]] = None,
         min_score: float = 0.05,
     ) -> List[Dict[str, Any]]:
-        qvec = _bow_vector(_tokenize(query))
-        scored: List[Tuple[float, MemoryUnit]] = []
+        qvec = self.embedder.embed(query)
 
-        for unit in self.units.values():
-            if kinds and unit.kind not in kinds:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM memory_units WHERE agent_id = ?",
+                (self.agent_id,),
+            ).fetchall()
+
+        scored: List[Tuple[float, Dict[str, Any]]] = []
+        for row in rows:
+            unit = self._row_to_unit(row)
+            if kinds and unit["kind"] not in kinds:
                 continue
-            score = _cosine(qvec, unit.vector)
 
-            # Experience gets mild priority boost (policy, not auto-approval)
-            if unit.kind == "experience":
+            score = cosine_similarity(qvec, unit.get("embedding") or [])
+
+            # Mild priority for approved experience
+            if unit["kind"] == "experience":
                 score *= 1.15
 
             if score >= min_score:
-                scored.append((score, unit))
+                item = dict(unit)
+                item.pop("embedding", None)
+                item["score"] = round(float(score), 4)
+                scored.append((score, item))
 
         scored.sort(key=lambda x: x[0], reverse=True)
-        results = []
-        for score, unit in scored[:top_k]:
-            item = unit.to_dict()
-            item["score"] = round(score, 4)
-            results.append(item)
-        return results
+        return [item for _, item in scored[:top_k]]
 
     def build_context_pack(
         self,
@@ -161,15 +189,12 @@ class RAGMemoryBrain:
         top_k: int = 5,
         kinds: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """
-        Build compact context for any model.
-        This is what gets sent instead of full memory dump.
-        """
         hits = self.retrieve(query=query, top_k=top_k, kinds=kinds)
         compact_blocks = []
         for h in hits:
+            title = h.get("title") or h["id"]
             compact_blocks.append(
-                f"[{h['kind'].upper()}] {h.get('title') or h['id']}\n{h['content'][:1200]}"
+                f"[{h['kind'].upper()}#{h.get('chunk_index', 0)}] {title}\n{h['content'][:1200]}"
             )
 
         return {
@@ -179,5 +204,8 @@ class RAGMemoryBrain:
             "units": hits,
             "context_text": "\n\n---\n\n".join(compact_blocks),
             "token_saving_policy": "top_k_retrieval_only",
+            "embedder": getattr(self.embedder, "name", "unknown"),
+            "persistent": True,
+            "db_path": self.db_path,
             "created_at": datetime.utcnow().isoformat(),
         }

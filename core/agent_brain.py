@@ -1,15 +1,6 @@
 """
 Ramaz X1 Agent Brain
-Version: 1.0.0
-
-Combines:
-- Multi-model router
-- RAG memory brain
-
-Effect:
-- Memory persists independently of which LLM is connected
-- New model can be attached without re-reading all history
-- Each call retrieves only relevant memory fragments
+Version: 2.0.0
 """
 
 from typing import Dict, Any, List, Optional
@@ -35,7 +26,7 @@ class AgentBrain:
     def list_models(self) -> List[Dict[str, Any]]:
         return self.models.list_models()
 
-    def remember_training(self, title: str, content: str, source_id: Optional[str] = None, meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def remember_training(self, title: str, content: str, source_id: Optional[str] = None, meta: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         return self.rag.upsert(
             kind="training",
             title=title,
@@ -44,7 +35,7 @@ class AgentBrain:
             meta=meta or {"source": "USER"},
         )
 
-    def remember_experience(self, title: str, content: str, source_id: Optional[str] = None, meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def remember_experience(self, title: str, content: str, source_id: Optional[str] = None, meta: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         return self.rag.upsert(
             kind="experience",
             title=title,
@@ -53,7 +44,7 @@ class AgentBrain:
             meta=meta or {"approved_by": "USER"},
         )
 
-    def remember_discovery_pending(self, title: str, content: str, source_id: Optional[str] = None, meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def remember_discovery_pending(self, title: str, content: str, source_id: Optional[str] = None, meta: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         meta = meta or {}
         meta["status"] = "PENDING_USER_APPROVAL"
         return self.rag.upsert(
@@ -68,10 +59,6 @@ class AgentBrain:
         return self.rag.build_context_pack(query=query, top_k=top_k, kinds=kinds)
 
     def build_model_prompt(self, task: str, query: str, top_k: int = 5) -> Dict[str, Any]:
-        """
-        Prepare prompt package for selected model(s).
-        Memory is retrieved once and can be reused by any connected model.
-        """
         context_pack = self.recall(query=query, top_k=top_k, kinds=["training", "experience"])
         selected = self.models.select(prefer_role="primary")
         ensemble = self.models.select_ensemble()
