@@ -33,7 +33,6 @@ def planning_node(state: Dict[str, Any]) -> Dict[str, Any]:
     state["current_node"] = "planning"
     state["mission_status"] = MissionStatus.PLANNING.name
     state["timestamps"]["planning"] = datetime.utcnow().isoformat()
-    # Default: route to Technical department for NDS analysis
     state["required_departments"] = ["Technical"]
     state["active_employees"] = ["TECH-NDS-01"]
     return state
@@ -101,7 +100,6 @@ def output_collection_node(state: Dict[str, Any]) -> Dict[str, Any]:
     state["mission_status"] = MissionStatus.REVIEWING.name
     state["timestamps"]["output_collection"] = datetime.utcnow().isoformat()
 
-    # TECH-MANAGER receives employee reports and aggregates
     agent_outputs = state.get("agent_outputs", {})
     if "TECH-NDS-01" in agent_outputs:
         try:
@@ -136,15 +134,47 @@ def output_collection_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def voting_node(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Voting node when required."""
+    """Assistant final decision node."""
     state["current_node"] = "voting"
     state["mission_status"] = MissionStatus.VOTING.name
     state["timestamps"]["voting"] = datetime.utcnow().isoformat()
+
+    agent_outputs = state.get("agent_outputs", {})
+    if "TECH-MANAGER" in agent_outputs:
+        try:
+            from assistant.assistant_nds import AssistantNDS
+
+            assistant = AssistantNDS()
+            dept_report = agent_outputs["TECH-MANAGER"].get("department_report", {})
+            assistant.receive_department_report(dept_report)
+
+            comparison = assistant.compare_reports()
+            decision = assistant.decide(
+                comparison=comparison,
+                mission_id=state.get("mission_id", "UNKNOWN")
+            )
+            submission = assistant.submit_to_user(decision)
+
+            state["agent_outputs"]["ASSISTANT-NDS"] = {
+                "comparison": comparison,
+                "decision": decision,
+                "submission": submission
+            }
+            state["final_decision"] = decision
+        except Exception as e:
+            if "errors" not in state:
+                state["errors"] = []
+            state["errors"].append({
+                "agent_id": "ASSISTANT-NDS",
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            })
+
     return state
 
 
 def report_generation_node(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Generate mission report."""
+    """Generate mission report including final decision."""
     state["current_node"] = "report_generation"
     state["mission_status"] = MissionStatus.REPORTING.name
     state["timestamps"]["report_generation"] = datetime.utcnow().isoformat()
@@ -152,15 +182,18 @@ def report_generation_node(state: Dict[str, Any]) -> Dict[str, Any]:
     agent_outputs = state.get("agent_outputs", {})
     reports = []
 
-    # Prefer department report from manager
+    if "ASSISTANT-NDS" in agent_outputs:
+        decision = agent_outputs["ASSISTANT-NDS"].get("decision")
+        if decision:
+            reports.append(decision)
+
     if "TECH-MANAGER" in agent_outputs:
         dept_report = agent_outputs["TECH-MANAGER"].get("department_report")
         if dept_report:
             reports.append(dept_report)
 
-    # Also keep employee reports
     for agent_id, output in agent_outputs.items():
-        if agent_id != "TECH-MANAGER" and "report" in output:
+        if agent_id not in ["TECH-MANAGER", "ASSISTANT-NDS"] and "report" in output:
             reports.append(output["report"])
 
     state["reports"] = reports
