@@ -1,116 +1,147 @@
-const API_BASE = "http://127.0.0.1:8000";
+const technicalWorkers = [
+  { id: "TECH-NDS-01", name: "NDS Worker" },
+  { id: "TECH-ICT-01", name: "ICT Worker" },
+  { id: "TECH-RTM-01", name: "RTM Worker" },
+  { id: "TECH-SD-01", name: "Supply Demand Worker" },
+  { id: "TECH-ASH-01", name: "Ash Trigger Worker" },
+];
 
-async function api(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
+const fundamentalWorkers = [
+  { id: "FUND-NEWS-01", name: "News Worker" },
+  { id: "FUND-X-01", name: "X Worker" },
+  { id: "FUND-YT-01", name: "YouTube Worker" },
+  { id: "FUND-TG-01", name: "Telegram Worker" },
+];
+
+// Tabs
+document.querySelectorAll(".tab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+    document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById(`tab-${btn.dataset.tab}`).classList.add("active");
   });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
-  }
-  return res.json();
-}
+});
 
-function setStatus(ok, text) {
-  const el = document.getElementById("systemStatus");
-  el.textContent = text;
-  el.className = "status-badge " + (ok ? "ok" : "err");
-}
+// Department sub-tabs
+document.querySelectorAll(".sub-tab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".sub-tab-btn").forEach((b) => b.classList.remove("active"));
+    document.querySelectorAll(".dept-panel").forEach((p) => p.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById(`dept-${btn.dataset.dept}`).classList.add("active");
+  });
+});
 
-async function loadSystem() {
-  const box = document.getElementById("systemInfo");
-  try {
-    const data = await api("/");
-    box.innerHTML = `
-      <p><strong>سیستم:</strong> ${data.system}</p>
-      <p><strong>نسخه:</strong> ${data.version}</p>
-      <p><strong>وضعیت Runtime:</strong> ${data.status}</p>
-      <p><strong>زمان:</strong> ${data.timestamp}</p>
-    `;
-    setStatus(true, `وضعیت: ${data.status}`);
-  } catch (e) {
-    box.innerHTML = `<p style="color:#fca5a5">اتصال برقرار نشد. Backend را اجرا کنید.</p><p>${e.message}</p>`;
-    setStatus(false, "Backend قطع است");
-  }
-}
+function employeeCard(worker) {
+  return `
+    <div class="employee-card">
+      <h4>${worker.name} <span style="color:#9aaccb;font-size:12px">(${worker.id})</span></h4>
 
-async function loadAgents() {
-  const box = document.getElementById("agentsList");
-  try {
-    const agents = await api("/agents");
-    if (!agents.length) {
-      box.innerHTML = "<p>Agentی ثبت نشده است.</p>";
-      return;
-    }
-    box.innerHTML = agents.map(a => `
-      <div class="agent-item">
-        <strong>${a.agent_id}</strong>
-        <span class="tag ${String(a.status || '').toLowerCase()}">${a.status || '-'}</span>
-        <div style="color:#9aaccb;font-size:12px;margin-top:4px">
-          ${a.name || ''} | ${a.agent_type || ''} | ${a.department || ''}
+      <div class="mini-card" style="margin-bottom:10px">
+        <h3>گزارش‌های کارمند</h3>
+        <div class="folder-list">
+          <div class="empty">پوشه گزارش‌ها خالی است</div>
         </div>
       </div>
-    `).join("");
-  } catch (e) {
-    box.innerHTML = `<p style="color:#fca5a5">خطا در دریافت Agentها</p>`;
-  }
-}
 
-async function loadMissions() {
-  const box = document.getElementById("missionsList");
-  try {
-    const missions = await api("/missions");
-    if (!missions.length) {
-      box.innerHTML = "<p>هنوز Missionی ثبت نشده است.</p>";
-      return;
-    }
-    box.innerHTML = missions.slice().reverse().map(m => `
-      <div class="mission-item">
-        <strong>${m.mission_id}</strong>
-        <span class="tag">${m.status || '-'}</span>
-        <div style="color:#9aaccb;font-size:12px;margin-top:4px">
-          ${m.mission_objective || ''}
+      <div class="mini-card" style="margin-bottom:10px">
+        <h3>گزارش لحظه‌ای کارمند</h3>
+        <div class="live-slide small">
+          <div class="slide-label">LIVE</div>
+          <div class="slide-body">در انتظار ورودی تصویری / منبع...</div>
         </div>
       </div>
-    `).join("");
-  } catch (e) {
-    box.innerHTML = `<p style="color:#fca5a5">خطا در دریافت Missionها</p>`;
-  }
+
+      <div class="mini-card">
+        <h3>ورودی دیداری</h3>
+        <input type="file" accept="image/*" multiple onchange="previewInline(this)" />
+        <div class="media-preview"></div>
+      </div>
+    </div>
+  `;
 }
 
-async function runMission(event) {
-  event.preventDefault();
-  const objective = document.getElementById("objective").value.trim();
-  const symbol = document.getElementById("symbol").value.trim() || "EURUSD";
-  const priority = document.getElementById("priority").value;
-  const resultBox = document.getElementById("missionResult");
-
-  resultBox.textContent = "در حال اجرای Mission...";
-
-  try {
-    const data = await api("/missions/run", {
-      method: "POST",
-      body: JSON.stringify({
-        objective,
-        priority,
-        mission_input: {
-          symbol,
-          timeframe: "M1",
-          context: "Submitted from Ramaz X1 Frontend"
-        },
-        success_criteria: "Produce valid analysis report"
-      })
-    });
-
-    resultBox.textContent = JSON.stringify(data, null, 2);
-    await loadMissions();
-  } catch (e) {
-    resultBox.textContent = "خطا در اجرای Mission:\n" + e.message;
-  }
+function renderEmployees() {
+  document.getElementById("technicalEmployees").innerHTML =
+    technicalWorkers.map(employeeCard).join("");
+  document.getElementById("fundamentalEmployees").innerHTML =
+    fundamentalWorkers.map(employeeCard).join("");
 }
 
-// Initial load
-loadSystem();
-loadAgents();
-loadMissions();
+function previewInline(input) {
+  const box = input.parentElement.querySelector(".media-preview");
+  box.innerHTML = "";
+  [...input.files].forEach((file) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = document.createElement("img");
+      img.src = e.target.result;
+      img.alt = file.name;
+      box.appendChild(img);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function previewMedia(inputId, previewId) {
+  const input = document.getElementById(inputId);
+  const box = document.getElementById(previewId);
+  box.innerHTML = "";
+  [...input.files].forEach((file) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = document.createElement("img");
+      img.src = e.target.result;
+      img.alt = file.name;
+      box.appendChild(img);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function submitVisualMission() {
+  const input = document.getElementById("missionMediaInput");
+  const note = document.getElementById("missionSourceNote").value.trim();
+  const log = document.getElementById("missionIntakeLog");
+  const preview = document.getElementById("missionMediaPreview");
+
+  preview.innerHTML = "";
+  const files = [...input.files];
+
+  if (!files.length && !note) {
+    log.textContent = "هیچ ورودی دیداری یا منبعی ثبت نشد.";
+    return;
+  }
+
+  files.forEach((file) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = document.createElement("img");
+      img.src = e.target.result;
+      img.alt = file.name;
+      preview.appendChild(img);
+    };
+    reader.readAsDataURL(file);
+  });
+
+  const payload = {
+    type: "VISUAL_MISSION_INPUT",
+    source_note: note || null,
+    files: files.map((f) => ({ name: f.name, type: f.type, size: f.size })),
+    created_at: new Date().toISOString(),
+    message: "Mission text form removed. Intake is screenshot / chart capture / source based."
+  };
+
+  log.textContent = JSON.stringify(payload, null, 2);
+
+  // Also reflect in outputs folder as intake record
+  const outputs = document.getElementById("finalOutputs");
+  if (outputs.querySelector(".empty")) outputs.innerHTML = "";
+  const item = document.createElement("div");
+  item.className = "folder-item";
+  item.textContent = `ورودی دیداری ثبت شد — فایل‌ها: ${files.length} — منبع: ${note || "نامشخص"}`;
+  outputs.prepend(item);
+}
+
+renderEmployees();

@@ -1,23 +1,31 @@
-# Ramaz X1 Frontend
+# Ramaz X1 Frontend (Organizational UI)
 
-Simple dashboard for Ramaz X1.
+## سربرگ‌های اصلی
+1. معاون
+2. اداره‌ها
+3. خروجی‌ها
 
-## Features
-- System status
-- Agents list
-- Run mission
-- Mission results
-- Missions history
+## ساختار
+### معاون
+- پوشه گزارش‌های معاون
+- اسلاید گزارش لحظه‌ای معاون
+- ورودی دیداری
 
-## How to use
+### اداره‌ها
+- اداره تکنیکال
+- اداره فاندامنتال
 
-1. Start backend:
-```bash
-cd backend
-py -m uvicorn main:app --reload
-```
+هر اداره:
+- گزارش‌های رئیس اداره
+- گزارش لحظه‌ای رئیس اداره
+- اسلاید هر کارمند:
+  - گزارش‌های کارمند
+  - گزارش لحظه‌ای کارمند
+  - ورودی دیداری
 
-2. Open `frontend/index.html` in browser
-   - Or serve it with any static server
+### خروجی‌ها
+- خروجی نهایی برای کاربر
+- ثبت ورودی مأموریت به‌صورت تصویری/منبعی (نه فرم متنی)
 
-API default address: `http://127.0.0.1:8000`
+## حذف شده
+- ارسال مأموریت متنی جدید

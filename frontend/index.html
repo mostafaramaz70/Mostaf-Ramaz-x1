@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Ramaz X1 — Dashboard</title>
+  <title>Ramaz X1 — داشبورد سازمانی</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -13,72 +13,147 @@
         <span class="logo">R</span>
         <div>
           <h1>Ramaz X1</h1>
-          <p>AI Trading Operating System</p>
+          <p>ساختار سازمانی چندعاملی</p>
         </div>
       </div>
-      <div class="status-badge" id="systemStatus">در حال بارگذاری...</div>
+      <div class="status-badge" id="systemStatus">آماده</div>
     </header>
 
-    <main class="grid">
-      <!-- System -->
-      <section class="card">
-        <h2>وضعیت سیستم</h2>
-        <div id="systemInfo" class="info-list">
-          <p>در حال اتصال به Backend...</p>
+    <!-- Main Tabs -->
+    <nav class="main-tabs">
+      <button class="tab-btn active" data-tab="assistant">معاون</button>
+      <button class="tab-btn" data-tab="departments">اداره‌ها</button>
+      <button class="tab-btn" data-tab="outputs">خروجی‌ها</button>
+    </nav>
+
+    <!-- TAB: معاون -->
+    <section id="tab-assistant" class="tab-panel active">
+      <div class="panel-grid">
+        <div class="card">
+          <h2>گزارش‌های معاون</h2>
+          <p class="muted">پوشه گزارش‌های ثبت‌شده توسط معاون</p>
+          <div id="assistantReportsFolder" class="folder-list">
+            <div class="empty">هنوز گزارشی ثبت نشده است.</div>
+          </div>
         </div>
-        <button class="btn" onclick="loadSystem()">بروزرسانی</button>
-      </section>
 
-      <!-- Agents -->
-      <section class="card">
-        <h2>Agentها</h2>
-        <div id="agentsList" class="agents">
-          <p>در حال بارگذاری...</p>
+        <div class="card">
+          <h2>گزارش لحظه‌ای معاون</h2>
+          <p class="muted">اسلاید نمایشی آخرین وضعیت تصمیم معاون</p>
+          <div id="assistantLiveSlide" class="live-slide">
+            <div class="slide-label">LIVE</div>
+            <div class="slide-body">
+              <div><strong>وضعیت:</strong> در انتظار داده</div>
+              <div><strong>سیگنال:</strong> -</div>
+              <div><strong>اعتماد:</strong> -</div>
+              <div><strong>خلاصه:</strong> هنوز گزارشی از ادارات دریافت نشده است.</div>
+            </div>
+          </div>
         </div>
-        <button class="btn" onclick="loadAgents()">بروزرسانی</button>
-      </section>
 
-      <!-- New Mission -->
-      <section class="card wide">
-        <h2>ارسال Mission جدید</h2>
-        <form id="missionForm" onsubmit="runMission(event)">
-          <label>هدف Mission</label>
-          <input type="text" id="objective" placeholder="مثلاً: تحلیل تکنیکال NDS روی EURUSD" required />
-
-          <label>نماد (Symbol)</label>
-          <input type="text" id="symbol" placeholder="EURUSD" value="EURUSD" />
-
-          <label>اولویت</label>
-          <select id="priority">
-            <option value="LOW">LOW</option>
-            <option value="MEDIUM" selected>MEDIUM</option>
-            <option value="HIGH">HIGH</option>
-            <option value="CRITICAL">CRITICAL</option>
-          </select>
-
-          <button type="submit" class="btn primary">اجرای Mission</button>
-        </form>
-      </section>
-
-      <!-- Mission Result -->
-      <section class="card wide">
-        <h2>نتیجه آخرین Mission</h2>
-        <pre id="missionResult" class="result">هنوز Mission اجرا نشده است.</pre>
-      </section>
-
-      <!-- Missions List -->
-      <section class="card wide">
-        <h2>لیست Missionها</h2>
-        <div id="missionsList" class="missions">
-          <p>در حال بارگذاری...</p>
+        <div class="card wide">
+          <h2>ورودی‌های دیداری / منابع</h2>
+          <p class="muted">اسکرین‌شات کاربر، تصویر چارت لحظه‌ای، یا منبع دریافتی</p>
+          <div class="upload-box">
+            <input type="file" id="assistantMediaInput" accept="image/*" multiple />
+            <button class="btn" onclick="previewMedia('assistantMediaInput','assistantMediaPreview')">نمایش فایل‌ها</button>
+          </div>
+          <div id="assistantMediaPreview" class="media-preview"></div>
         </div>
-        <button class="btn" onclick="loadMissions()">بروزرسانی</button>
-      </section>
-    </main>
+      </div>
+    </section>
 
-    <footer class="footer">
-      Ramaz X1 v1.0 — Multi-Agent AI Organization
-    </footer>
+    <!-- TAB: اداره‌ها -->
+    <section id="tab-departments" class="tab-panel">
+      <div class="sub-tabs">
+        <button class="sub-tab-btn active" data-dept="technical">اداره تکنیکال</button>
+        <button class="sub-tab-btn" data-dept="fundamental">اداره فاندامنتال</button>
+      </div>
+
+      <!-- Technical Department -->
+      <div id="dept-technical" class="dept-panel active">
+        <div class="card">
+          <h2>رئیس اداره تکنیکال</h2>
+          <div class="panel-grid">
+            <div class="mini-card">
+              <h3>گزارش‌های رئیس اداره</h3>
+              <div id="techManagerReports" class="folder-list">
+                <div class="empty">خالی</div>
+              </div>
+            </div>
+            <div class="mini-card">
+              <h3>گزارش لحظه‌ای رئیس اداره</h3>
+              <div class="live-slide small">
+                <div class="slide-label">LIVE</div>
+                <div class="slide-body" id="techManagerLive">در انتظار گزارش کارمندان...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <h3 class="section-title">کارمندان تکنیکال</h3>
+        <div class="employees-grid" id="technicalEmployees">
+          <!-- filled by JS -->
+        </div>
+      </div>
+
+      <!-- Fundamental Department -->
+      <div id="dept-fundamental" class="dept-panel">
+        <div class="card">
+          <h2>رئیس اداره فاندامنتال</h2>
+          <div class="panel-grid">
+            <div class="mini-card">
+              <h3>گزارش‌های رئیس اداره</h3>
+              <div id="fundManagerReports" class="folder-list">
+                <div class="empty">خالی</div>
+              </div>
+            </div>
+            <div class="mini-card">
+              <h3>گزارش لحظه‌ای رئیس اداره</h3>
+              <div class="live-slide small">
+                <div class="slide-label">LIVE</div>
+                <div class="slide-body" id="fundManagerLive">در انتظار گزارش کارمندان...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <h3 class="section-title">کارمندان فاندامنتال</h3>
+        <div class="employees-grid" id="fundamentalEmployees">
+          <!-- filled by JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: خروجی‌ها -->
+    <section id="tab-outputs" class="tab-panel">
+      <div class="panel-grid">
+        <div class="card wide">
+          <h2>خروجی نهایی برای کاربر</h2>
+          <p class="muted">تصمیم نهایی معاون + گزارش‌های ادارات + فایل‌های دیداری مرتبط</p>
+          <div id="finalOutputs" class="folder-list">
+            <div class="empty">هنوز خروجی نهایی ثبت نشده است.</div>
+          </div>
+        </div>
+
+        <div class="card wide">
+          <h2>ورودی‌های تصویری مأموریت</h2>
+          <p class="muted">
+            مأموریت جدید از متن ساخته نمی‌شود.
+            ورودی اصلی: اسکرین‌شات کاربر، تصویر لحظه‌ای چارت، یا منبع دریافتی ایجنت‌هاست.
+          </p>
+          <div class="upload-box">
+            <input type="file" id="missionMediaInput" accept="image/*" multiple />
+            <input type="text" id="missionSourceNote" placeholder="توضیح منبع (اختیاری) مثلاً چارت EURUSD M1" />
+            <button class="btn primary" onclick="submitVisualMission()">ثبت ورودی دیداری</button>
+          </div>
+          <div id="missionMediaPreview" class="media-preview"></div>
+          <pre id="missionIntakeLog" class="result">هنوز ورودی دیداری ثبت نشده است.</pre>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">Ramaz X1 — معاون / ادارات / خروجی‌ها</footer>
   </div>
 
   <script src="app.js"></script>
