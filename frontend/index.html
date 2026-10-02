@@ -13,17 +13,17 @@
         <span class="logo">R</span>
         <div>
           <h1>Ramaz X1</h1>
-          <p>ساختار سازمانی چندعاملی</p>
+          <p>ساختار سازمانی + آموزش ایجنت‌ها</p>
         </div>
       </div>
       <div class="status-badge" id="systemStatus">آماده</div>
     </header>
 
-    <!-- Main Tabs -->
     <nav class="main-tabs">
       <button class="tab-btn active" data-tab="assistant">معاون</button>
       <button class="tab-btn" data-tab="departments">اداره‌ها</button>
       <button class="tab-btn" data-tab="outputs">خروجی‌ها</button>
+      <button class="tab-btn" data-tab="training">آموزش</button>
     </nav>
 
     <!-- TAB: معاون -->
@@ -39,26 +39,19 @@
 
         <div class="card">
           <h2>گزارش لحظه‌ای معاون</h2>
-          <p class="muted">اسلاید نمایشی آخرین وضعیت تصمیم معاون</p>
           <div id="assistantLiveSlide" class="live-slide">
             <div class="slide-label">LIVE</div>
             <div class="slide-body">
               <div><strong>وضعیت:</strong> در انتظار داده</div>
               <div><strong>سیگنال:</strong> -</div>
               <div><strong>اعتماد:</strong> -</div>
-              <div><strong>خلاصه:</strong> هنوز گزارشی از ادارات دریافت نشده است.</div>
             </div>
           </div>
         </div>
 
         <div class="card wide">
-          <h2>ورودی‌های دیداری / منابع</h2>
-          <p class="muted">اسکرین‌شات کاربر، تصویر چارت لحظه‌ای، یا منبع دریافتی</p>
-          <div class="upload-box">
-            <input type="file" id="assistantMediaInput" accept="image/*" multiple />
-            <button class="btn" onclick="previewMedia('assistantMediaInput','assistantMediaPreview')">نمایش فایل‌ها</button>
-          </div>
-          <div id="assistantMediaPreview" class="media-preview"></div>
+          <h2>آموزش معاون</h2>
+          <div id="train-ASSISTANT-NDS" class="training-box"></div>
         </div>
       </div>
     </section>
@@ -70,16 +63,13 @@
         <button class="sub-tab-btn" data-dept="fundamental">اداره فاندامنتال</button>
       </div>
 
-      <!-- Technical Department -->
       <div id="dept-technical" class="dept-panel active">
         <div class="card">
           <h2>رئیس اداره تکنیکال</h2>
           <div class="panel-grid">
             <div class="mini-card">
               <h3>گزارش‌های رئیس اداره</h3>
-              <div id="techManagerReports" class="folder-list">
-                <div class="empty">خالی</div>
-              </div>
+              <div id="techManagerReports" class="folder-list"><div class="empty">خالی</div></div>
             </div>
             <div class="mini-card">
               <h3>گزارش لحظه‌ای رئیس اداره</h3>
@@ -89,24 +79,20 @@
               </div>
             </div>
           </div>
+          <div class="training-box" id="train-TECH-MANAGER"></div>
         </div>
 
         <h3 class="section-title">کارمندان تکنیکال</h3>
-        <div class="employees-grid" id="technicalEmployees">
-          <!-- filled by JS -->
-        </div>
+        <div class="employees-grid" id="technicalEmployees"></div>
       </div>
 
-      <!-- Fundamental Department -->
       <div id="dept-fundamental" class="dept-panel">
         <div class="card">
           <h2>رئیس اداره فاندامنتال</h2>
           <div class="panel-grid">
             <div class="mini-card">
               <h3>گزارش‌های رئیس اداره</h3>
-              <div id="fundManagerReports" class="folder-list">
-                <div class="empty">خالی</div>
-              </div>
+              <div id="fundManagerReports" class="folder-list"><div class="empty">خالی</div></div>
             </div>
             <div class="mini-card">
               <h3>گزارش لحظه‌ای رئیس اداره</h3>
@@ -116,12 +102,11 @@
               </div>
             </div>
           </div>
+          <div class="training-box" id="train-FUND-MANAGER"></div>
         </div>
 
         <h3 class="section-title">کارمندان فاندامنتال</h3>
-        <div class="employees-grid" id="fundamentalEmployees">
-          <!-- filled by JS -->
-        </div>
+        <div class="employees-grid" id="fundamentalEmployees"></div>
       </div>
     </section>
 
@@ -130,7 +115,6 @@
       <div class="panel-grid">
         <div class="card wide">
           <h2>خروجی نهایی برای کاربر</h2>
-          <p class="muted">تصمیم نهایی معاون + گزارش‌های ادارات + فایل‌های دیداری مرتبط</p>
           <div id="finalOutputs" class="folder-list">
             <div class="empty">هنوز خروجی نهایی ثبت نشده است.</div>
           </div>
@@ -138,13 +122,10 @@
 
         <div class="card wide">
           <h2>ورودی‌های تصویری مأموریت</h2>
-          <p class="muted">
-            مأموریت جدید از متن ساخته نمی‌شود.
-            ورودی اصلی: اسکرین‌شات کاربر، تصویر لحظه‌ای چارت، یا منبع دریافتی ایجنت‌هاست.
-          </p>
+          <p class="muted">مأموریت از اسکرین‌شات / چارت لحظه‌ای / منبع دریافتی ثبت می‌شود.</p>
           <div class="upload-box">
             <input type="file" id="missionMediaInput" accept="image/*" multiple />
-            <input type="text" id="missionSourceNote" placeholder="توضیح منبع (اختیاری) مثلاً چارت EURUSD M1" />
+            <input type="text" id="missionSourceNote" placeholder="توضیح منبع (اختیاری)" />
             <button class="btn primary" onclick="submitVisualMission()">ثبت ورودی دیداری</button>
           </div>
           <div id="missionMediaPreview" class="media-preview"></div>
@@ -153,7 +134,80 @@
       </div>
     </section>
 
-    <footer class="footer">Ramaz X1 — معاون / ادارات / خروجی‌ها</footer>
+    <!-- TAB: آموزش -->
+    <section id="tab-training" class="tab-panel">
+      <div class="card wide">
+        <h2>مرکز آموزش ایجنت‌ها</h2>
+        <p class="muted">
+          کاربر آموزش هر ایجنت را بارگذاری می‌کند، امتحان می‌گیرد،
+          و در صورت تأیید، آموزش به تجربه منتقل و در حافظه ذخیره می‌شود.
+        </p>
+
+        <div class="upload-box">
+          <label class="muted">انتخاب ایجنت</label>
+          <select id="trainingAgentSelect"></select>
+
+          <label class="muted">عنوان آموزش</label>
+          <input type="text" id="trainingTitle" placeholder="مثلاً: مفهوم نقدینگی" />
+
+          <label class="muted">متن آموزش / یادداشت کاربر</label>
+          <textarea id="trainingContent" rows="5" placeholder="متن آموزش را اینجا بنویسید..."></textarea>
+
+          <label class="muted">فایل آموزش (PDF / تصویر / ویدیو)</label>
+          <input type="file" id="trainingFile" accept=".pdf,image/*,video/*" />
+
+          <label class="muted">منبع</label>
+          <select id="trainingSourceType">
+            <option value="MANUAL">دستی</option>
+            <option value="PDF">PDF</option>
+            <option value="TELEGRAM">تلگرام</option>
+            <option value="VIDEO">ویدیو</option>
+          </select>
+
+          <button class="btn primary" onclick="saveTraining()">ذخیره آموزش در حافظه ایجنت</button>
+        </div>
+      </div>
+
+      <div class="card wide">
+        <h2>امتحان از ایجنت</h2>
+        <div class="upload-box">
+          <label class="muted">ایجنت</label>
+          <select id="examAgentSelect"></select>
+
+          <label class="muted">سؤال / سناریوی امتحان</label>
+          <textarea id="examQuestion" rows="3" placeholder="سؤال امتحان را بنویسید..."></textarea>
+
+          <label class="muted">پاسخ مورد انتظار کاربر</label>
+          <textarea id="examExpected" rows="3" placeholder="پاسخ درست از نظر شما..."></textarea>
+
+          <label class="muted">نمره (۰ تا ۱)</label>
+          <input type="number" id="examScore" min="0" max="1" step="0.1" value="0.8" />
+
+          <label class="muted">بازخورد</label>
+          <input type="text" id="examFeedback" placeholder="توضیح کوتاه ارزیابی" />
+
+          <button class="btn primary" onclick="submitExam()">ثبت امتحان و انتقال به تجربه (در صورت قبول)</button>
+        </div>
+        <pre id="examLog" class="result">هنوز امتحانی ثبت نشده است.</pre>
+      </div>
+
+      <div class="card wide">
+        <h2>حافظه آموزش و تجربه ایجنت انتخابی</h2>
+        <select id="memoryAgentSelect" onchange="renderAgentMemory()"></select>
+        <div class="panel-grid" style="margin-top:12px">
+          <div class="mini-card">
+            <h3>آموزش‌ها (Training Memory)</h3>
+            <div id="memoryTrainingList" class="folder-list"><div class="empty">خالی</div></div>
+          </div>
+          <div class="mini-card">
+            <h3>تجربه‌ها (Experience Memory)</h3>
+            <div id="memoryExperienceList" class="folder-list"><div class="empty">خالی</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">Ramaz X1 — آموزش توسط کاربر، تجربه از امتحان، حافظه برای خروجی نهایی</footer>
   </div>
 
   <script src="app.js"></script>
