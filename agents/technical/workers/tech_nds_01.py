@@ -4,31 +4,21 @@ Technical Department
 Version: 2.0.0
 Status: RAW / Ready for Training
 
-Important:
-- This agent starts RAW.
-- Domain knowledge (e.g. market structure concepts) must be taught by User.
-- User training becomes Training Memory.
-- User tests convert into Experience.
-- At runtime agent relies on Training + Experience, with higher weight on Experience.
+Project rule:
+- Agent starts RAW
+- User teaches -> Training memory
+- User tests -> Experience memory
+- Runtime uses Training + Experience
+- Experience has higher weight than Training
+- No hardcoded domain concepts (BOS/CHoCH/etc.)
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from datetime import datetime
 from memory.memory_engine import MemoryEngine
 
 
 class TechNDS01:
-    """
-    Raw employee agent.
-
-    Lifecycle intended by project design:
-    1. User teaches (Training)
-    2. User tests agent
-    3. Test outcomes become Experience
-    4. Agent later answers using Training + Experience
-       (Experience has higher weight)
-    """
-
     IDENTITY = {
         "agent_id": "TECH-NDS-01",
         "name": "NDS Worker",
@@ -40,12 +30,12 @@ class TechNDS01:
     }
 
     RESPONSIBILITIES = [
-        "Receive training materials from User through Manager path",
-        "Store approved training in training memory",
-        "Take user tests and convert results into experience",
+        "Receive training from User",
+        "Store training in training memory",
+        "Take User tests and convert them into experience",
         "Use training + experience during analysis",
-        "Weight experience higher than pure training",
-        "Submit structured report only to TECH-MANAGER"
+        "Weight experience higher than training",
+        "Submit report only to TECH-MANAGER"
     ]
 
     RESTRICTIONS = [
@@ -60,53 +50,24 @@ class TechNDS01:
     def __init__(self):
         self.identity = self.IDENTITY.copy()
         self.memory_engine = MemoryEngine(agent_id=self.identity["agent_id"])
-        self.training_memory: List[Dict[str, Any]] = []
 
-    # -----------------------------
-    # Training (by User)
-    # -----------------------------
     def receive_training(self, training_item: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Store a training item taught by User.
-
-        Expected example:
-        {
-          "title": "...",
-          "content": "...",
-          "source": "USER",
-          "tags": ["..."]
-        }
-        """
-        entry = {
-            "id": f"TRAIN-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
-            "title": training_item.get("title", "Untitled Training"),
-            "content": training_item.get("content", ""),
-            "source": training_item.get("source", "USER"),
-            "tags": training_item.get("tags", []),
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        self.training_memory.append(entry)
-        self.memory_engine.add_working(entry, meta={"type": "training"})
-        return {"status": "STORED", "training_id": entry["id"]}
+        """User teaches the agent."""
+        training_id = self.memory_engine.add_training(
+            content=training_item.get("content", ""),
+            title=training_item.get("title", "Untitled Training"),
+            source=training_item.get("source", "USER"),
+            tags=training_item.get("tags", [])
+        )
+        return {"status": "STORED", "training_id": training_id}
 
     def list_training(self) -> List[Dict[str, Any]]:
-        return self.training_memory
+        return self.memory_engine.get_training()
 
-    # -----------------------------
-    # Testing by User -> Experience
-    # -----------------------------
     def take_test(self, test_input: Dict[str, Any], user_evaluation: Dict[str, Any]) -> Dict[str, Any]:
         """
         User tests the agent.
-        User evaluation is converted into Experience.
-
-        test_input: the question / case given by user
-        user_evaluation: {
-            "score": 0..1,
-            "correct": true/false,
-            "feedback": "...",
-            "expected": "..."
-        }
+        Evaluation becomes Experience.
         """
         experience = {
             "test_input": test_input,
@@ -123,44 +84,41 @@ class TechNDS01:
             confidence=float(user_evaluation.get("score", 0))
         )
 
+        # If agent has any training or experience, leave pure RAW label conceptually
+        if self.identity["status"] == "RAW":
+            self.identity["status"] = "TRAINING"
+
         return {
             "status": "EXPERIENCE_CREATED",
             "experience_id": exp_id,
             "score": experience["score"]
         }
 
-    # -----------------------------
-    # Runtime usage of memory
-    # -----------------------------
     def _retrieve_relevant_training(self, query: str) -> List[Dict[str, Any]]:
+        items = self.memory_engine.get_training()
         q = (query or "").lower()
         if not q:
-            return self.training_memory[-5:]
+            return items[-5:]
         hits = []
-        for item in self.training_memory:
+        for item in items:
             blob = f"{item.get('title','')} {item.get('content','')} {' '.join(item.get('tags', []))}".lower()
             if q in blob:
                 hits.append(item)
-        return hits[-5:] if hits else self.training_memory[-3:]
+        return hits[-5:] if hits else items[-3:]
 
     def _retrieve_relevant_experience(self, query: str) -> List[Dict[str, Any]]:
-        experiences = self.memory_engine.get_experience()
+        items = self.memory_engine.get_experience()
         q = (query or "").lower()
         if not q:
-            return experiences[-5:]
+            return items[-5:]
         hits = []
-        for exp in experiences:
-            blob = str(exp.get("content", "")).lower()
-            if q in blob:
+        for exp in items:
+            if q in str(exp.get("content", "")).lower():
                 hits.append(exp)
-        return hits[-5:] if hits else experiences[-3:]
+        return hits[-5:] if hits else items[-3:]
 
     def analyze(self, mission_input: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Analyze using only taught training + lived experience.
-        No hardcoded market concepts.
-        Experience is weighted higher than training.
-        """
+        """Use only Training + Experience. Experience has higher weight."""
         self.memory_engine.add_working(mission_input, meta={"type": "mission_input"})
 
         objective = str(mission_input.get("objective", ""))
@@ -173,13 +131,10 @@ class TechNDS01:
         has_training = len(training_hits) > 0
         has_experience = len(experience_hits) > 0
 
-        # Confidence model: experience-heavy
         confidence = 0.0
         if has_training:
             confidence += 0.25
         if has_experience:
-            # higher weight
-            avg_exp = 0.0
             scores = []
             for exp in experience_hits:
                 content = exp.get("content", {})
@@ -193,28 +148,19 @@ class TechNDS01:
         confidence = round(min(confidence, 0.95), 2)
 
         if not has_training and not has_experience:
-            summary = (
-                "Agent is RAW. No training and no experience available yet. "
-                "User must teach and test this agent before reliable analysis."
-            )
+            summary = "Agent is RAW. No training and no experience yet. User must teach and test first."
             recommendation = "NO_TRADE"
             basis = "NONE"
         elif has_experience and has_training:
-            summary = (
-                "Response prepared from relevant training and prior experience. "
-                "Experience weighted higher than training."
-            )
+            summary = "Prepared from training + experience. Experience weighted higher."
             recommendation = "WAIT_USER_VALIDATION"
             basis = "TRAINING+EXPERIENCE"
         elif has_experience:
-            summary = "Response prepared mainly from prior experience."
+            summary = "Prepared mainly from experience."
             recommendation = "WAIT_USER_VALIDATION"
             basis = "EXPERIENCE"
         else:
-            summary = (
-                "Only training is available. Experience is still weak. "
-                "User testing is required to strengthen decisions."
-            )
+            summary = "Only training available. User testing is required to build experience."
             recommendation = "WAIT_USER_VALIDATION"
             basis = "TRAINING_ONLY"
 
@@ -233,7 +179,7 @@ class TechNDS01:
                 "experience_refs": [e.get("id") for e in experience_hits],
                 "summary": summary,
                 "notes": [
-                    "No hardcoded domain rules are embedded in this agent.",
+                    "No hardcoded domain rules are embedded.",
                     "Knowledge must come from User training and tested experience."
                 ]
             },
@@ -244,7 +190,7 @@ class TechNDS01:
                 "Experience weight > Training weight"
             ],
             "limitations": [
-                "Domain skill depends on User training quality",
+                "Skill depends on User training quality",
                 "Without tests, experience remains weak",
                 "No autonomous concept invention allowed"
             ],

@@ -1,14 +1,14 @@
 """
 Ramaz X1 Agents Setup based on Blueprint
-Version: 1.0.0
+Version: 1.1.0
 
 Hierarchy:
 User (Founder)
   └── Assistant (NDS / معاون)
         ├── Technical Department Manager
-        │     └── Technical Workers (NDS, ICT, RTM, Supply&Demand, Ash Trigger, ...)
+        │     └── Technical Workers (raw/trainable)
         └── Fundamental Department Manager
-              └── Fundamental Workers (News, X, YouTube, Telegram, ...)
+              └── Fundamental Workers (raw/trainable)
 
 Communication Rules:
 - Employees only communicate with their own Department Manager
@@ -16,6 +16,12 @@ Communication Rules:
 - Employees never communicate with Assistant
 - Managers communicate with Assistant
 - Assistant communicates with User
+
+Training Model:
+- Employees start RAW
+- User teaches them
+- User tests them -> Experience
+- Runtime uses Training + Experience (Experience has higher weight)
 """
 
 from runtime.registry import AgentRegistry
@@ -46,13 +52,13 @@ def setup_blueprint_agents(registry: AgentRegistry) -> None:
         status="ACTIVE"
     )
 
-    # Technical Workers
+    # Technical Workers (RAW / trainable)
     technical_workers = [
-        ("TECH-NDS-01", "NDS Worker", "NDS Analysis"),
-        ("TECH-ICT-01", "ICT Worker", "ICT Concepts"),
-        ("TECH-RTM-01", "RTM Worker", "RTM Analysis"),
-        ("TECH-SD-01", "Supply Demand Worker", "Supply & Demand"),
-        ("TECH-ASH-01", "Ash Trigger Worker", "Ash Trigger"),
+        ("TECH-NDS-01", "NDS Worker", "Trainable Technical Analyst"),
+        ("TECH-ICT-01", "ICT Worker", "Trainable Technical Analyst"),
+        ("TECH-RTM-01", "RTM Worker", "Trainable Technical Analyst"),
+        ("TECH-SD-01", "Supply Demand Worker", "Trainable Technical Analyst"),
+        ("TECH-ASH-01", "Ash Trigger Worker", "Trainable Technical Analyst"),
     ]
 
     for agent_id, name, role in technical_workers:
@@ -62,8 +68,8 @@ def setup_blueprint_agents(registry: AgentRegistry) -> None:
             agent_type="Employee",
             department="Technical",
             role=role,
-            version="1.0",
-            status="READY" if agent_id == "TECH-NDS-01" else "WAITING"
+            version="2.0" if agent_id == "TECH-NDS-01" else "1.0",
+            status="RAW" if agent_id == "TECH-NDS-01" else "WAITING"
         )
 
     # Fundamental Department Manager
@@ -77,12 +83,12 @@ def setup_blueprint_agents(registry: AgentRegistry) -> None:
         status="ACTIVE"
     )
 
-    # Fundamental Workers
+    # Fundamental Workers (RAW / trainable)
     fundamental_workers = [
-        ("FUND-NEWS-01", "News Worker", "News Analysis"),
-        ("FUND-X-01", "X Worker", "X/Twitter Analysis"),
-        ("FUND-YT-01", "YouTube Worker", "YouTube Analysis"),
-        ("FUND-TG-01", "Telegram Worker", "Telegram Analysis"),
+        ("FUND-NEWS-01", "News Worker", "Trainable Fundamental Analyst"),
+        ("FUND-X-01", "X Worker", "Trainable Fundamental Analyst"),
+        ("FUND-YT-01", "YouTube Worker", "Trainable Fundamental Analyst"),
+        ("FUND-TG-01", "Telegram Worker", "Trainable Fundamental Analyst"),
     ]
 
     for agent_id, name, role in fundamental_workers:
