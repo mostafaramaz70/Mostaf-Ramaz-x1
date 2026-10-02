@@ -13,13 +13,12 @@ const AGENTS = [
   { id: "FUND-TG-01", name: "Telegram Worker", type: "Employee", dept: "fundamental" },
 ];
 
-// Local memory store for UI (mirrors future backend memory)
+// Local UI memory (backend is source of truth when connected)
 const agentMemory = {};
 AGENTS.forEach((a) => {
-  agentMemory[a.id] = { training: [], experience: [] };
+  agentMemory[a.id] = { training: [], experience: [], discoveries: [], exams: [] };
 });
 
-// Tabs
 document.querySelectorAll(".tab-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
@@ -48,11 +47,21 @@ function trainingMiniUI(agentId) {
       <button class="btn" onclick="saveTrainingFor('${agentId}')">ذخیره آموزش</button>
       <div class="folder-list" id="list-train-${agentId}"><div class="empty">آموزشی ثبت نشده</div></div>
 
-      <h3 style="font-size:13px;color:#c7d2fe;margin-top:8px">امتحان</h3>
+      <h3 style="font-size:13px;color:#c7d2fe;margin-top:8px">امتحان (فقط ارزیابی)</h3>
       <textarea rows="2" placeholder="سؤال امتحان" id="q-${agentId}"></textarea>
       <input type="number" min="0" max="1" step="0.1" value="0.8" id="score-${agentId}" />
       <input type="text" placeholder="بازخورد" id="fb-${agentId}" />
-      <button class="btn primary" onclick="examFor('${agentId}')">ثبت امتحان</button>
+      <button class="btn" onclick="examFor('${agentId}')">ثبت نتیجه امتحان</button>
+      <div class="folder-list" id="list-exam-${agentId}"><div class="empty">امتحانی ثبت نشده</div></div>
+
+      <h3 style="font-size:13px;color:#c7d2fe;margin-top:8px">انتقال به تجربه (فقط کاربر)</h3>
+      <select id="promote-train-${agentId}"></select>
+      <button class="btn primary" onclick="promoteTraining('${agentId}')">تأیید کاربر: انتقال آموزش به تجربه</button>
+
+      <h3 style="font-size:13px;color:#c7d2fe;margin-top:8px">کشف‌های پیشنهادی ایجنت</h3>
+      <div class="folder-list" id="list-disc-${agentId}"><div class="empty">کشف معلقی نیست</div></div>
+
+      <h3 style="font-size:13px;color:#c7d2fe;margin-top:8px">تجربه‌ها</h3>
       <div class="folder-list" id="list-exp-${agentId}"><div class="empty">تجربه‌ای ثبت نشده</div></div>
     </div>
   `;
@@ -62,12 +71,10 @@ function employeeCard(agent) {
   return `
     <div class="employee-card">
       <h4>${agent.name} <span style="color:#9aaccb;font-size:12px">(${agent.id})</span></h4>
-
       <div class="mini-card" style="margin-bottom:10px">
         <h3>گزارش‌های کارمند</h3>
         <div class="folder-list"><div class="empty">خالی</div></div>
       </div>
-
       <div class="mini-card" style="margin-bottom:10px">
         <h3>گزارش لحظه‌ای کارمند</h3>
         <div class="live-slide small">
@@ -75,7 +82,6 @@ function employeeCard(agent) {
           <div class="slide-body">در انتظار ورودی تصویری / منبع...</div>
         </div>
       </div>
-
       ${trainingMiniUI(agent.id)}
     </div>
   `;
@@ -87,16 +93,16 @@ function renderEmployees() {
   document.getElementById("technicalEmployees").innerHTML = tech.map(employeeCard).join("");
   document.getElementById("fundamentalEmployees").innerHTML = fund.map(employeeCard).join("");
 
-  // managers + assistant training boxes
-  const map = [
+  [
     ["train-ASSISTANT-NDS", "ASSISTANT-NDS"],
     ["train-TECH-MANAGER", "TECH-MANAGER"],
     ["train-FUND-MANAGER", "FUND-MANAGER"],
-  ];
-  map.forEach(([el, id]) => {
+  ].forEach(([el, id]) => {
     const node = document.getElementById(el);
     if (node) node.innerHTML = trainingMiniUI(id);
   });
+
+  AGENTS.forEach((a) => renderLists(a.id));
 }
 
 function fillAgentSelects() {
@@ -113,14 +119,41 @@ function renderLists(agentId) {
   const tList = document.getElementById(`list-train-${agentId}`);
   if (tList) {
     tList.innerHTML = mem.training.length
-      ? mem.training.map((t) => `<div class="folder-item"><span class="tag">TRAIN</span>${t.title}</div>`).join("")
+      ? mem.training.map((t) => `<div class="folder-item"><span class="tag">TRAIN</span>${t.title} <small>(${t.id})</small></div>`).join("")
       : `<div class="empty">آموزشی ثبت نشده</div>`;
+  }
+
+  const promote = document.getElementById(`promote-train-${agentId}`);
+  if (promote) {
+    promote.innerHTML = mem.training.length
+      ? mem.training.map((t) => `<option value="${t.id}">${t.title}</option>`).join("")
+      : `<option value="">آموزشی نیست</option>`;
+  }
+
+  const examList = document.getElementById(`list-exam-${agentId}`);
+  if (examList) {
+    examList.innerHTML = mem.exams.length
+      ? mem.exams.map((e) => `<div class="folder-item"><span class="tag warn">EXAM</span>نمره ${e.score} — ${e.question}</div>`).join("")
+      : `<div class="empty">امتحانی ثبت نشده</div>`;
+  }
+
+  const dList = document.getElementById(`list-disc-${agentId}`);
+  if (dList) {
+    const pending = mem.discoveries.filter((d) => d.status === "PENDING_USER_APPROVAL");
+    dList.innerHTML = pending.length
+      ? pending.map((d) => `
+          <div class="folder-item">
+            <div><span class="tag warn">DISCOVERY</span>${JSON.stringify(d.content)}</div>
+            <button class="btn" onclick="approveDiscovery('${agentId}','${d.id}')">تأیید کاربر → تجربه</button>
+            <button class="btn" onclick="rejectDiscovery('${agentId}','${d.id}')">رد کشف</button>
+          </div>`).join("")
+      : `<div class="empty">کشف معلقی نیست</div>`;
   }
 
   const eList = document.getElementById(`list-exp-${agentId}`);
   if (eList) {
     eList.innerHTML = mem.experience.length
-      ? mem.experience.map((e) => `<div class="folder-item"><span class="tag ok">EXP</span>نمره ${e.score} — ${e.feedback || ""}</div>`).join("")
+      ? mem.experience.map((e) => `<div class="folder-item"><span class="tag ok">EXP</span>${e.id}</div>`).join("")
       : `<div class="empty">تجربه‌ای ثبت نشده</div>`;
   }
 }
@@ -128,13 +161,8 @@ function renderLists(agentId) {
 function saveTrainingFor(agentId) {
   const title = (document.getElementById(`title-${agentId}`)?.value || "").trim() || "آموزش بدون عنوان";
   const content = (document.getElementById(`content-${agentId}`)?.value || "").trim();
-  const fileInput = document.getElementById(`file-${agentId}`);
-  const fileName = fileInput?.files?.[0]?.name || null;
-
-  if (!content && !fileName) {
-    alert("متن آموزش یا فایل لازم است.");
-    return;
-  }
+  const fileName = document.getElementById(`file-${agentId}`)?.files?.[0]?.name || null;
+  if (!content && !fileName) return alert("متن آموزش یا فایل لازم است.");
 
   agentMemory[agentId].training.push({
     id: `TRAIN-${Date.now()}`,
@@ -144,7 +172,6 @@ function saveTrainingFor(agentId) {
     source: "USER",
     created_at: new Date().toISOString(),
   });
-
   renderLists(agentId);
   renderAgentMemory();
 }
@@ -153,34 +180,75 @@ function examFor(agentId) {
   const question = (document.getElementById(`q-${agentId}`)?.value || "").trim();
   const score = Number(document.getElementById(`score-${agentId}`)?.value || 0);
   const feedback = (document.getElementById(`fb-${agentId}`)?.value || "").trim();
+  if (!question) return alert("سؤال امتحان لازم است.");
 
-  if (!question) {
-    alert("سؤال امتحان لازم است.");
-    return;
-  }
-
-  const passed = score >= 0.7;
-  const exp = {
-    id: `EXP-${Date.now()}`,
+  // Exam is evaluation only. NO auto transfer to experience.
+  agentMemory[agentId].exams.push({
+    id: `EXAM-${Date.now()}`,
     question,
     score,
     feedback,
-    passed,
     created_at: new Date().toISOString(),
-    from_training_count: agentMemory[agentId].training.length,
-  };
+  });
+  renderLists(agentId);
+  alert("نتیجه امتحان ثبت شد. انتقال به تجربه فقط با تأیید جداگانه کاربر انجام می‌شود.");
+}
 
-  // Only transfer to experience if acceptable
-  if (passed) {
-    agentMemory[agentId].experience.push(exp);
-  }
+function promoteTraining(agentId) {
+  const trainingId = document.getElementById(`promote-train-${agentId}`)?.value;
+  if (!trainingId) return alert("آموزشی برای انتقال انتخاب نشده است.");
 
+  const training = agentMemory[agentId].training.find((t) => t.id === trainingId);
+  if (!training) return alert("آموزش پیدا نشد.");
+
+  // USER explicit approval required
+  const ok = confirm("آیا تأیید می‌کنید این آموزش به تجربه منتقل شود؟");
+  if (!ok) return;
+
+  agentMemory[agentId].experience.push({
+    id: `EXP-${Date.now()}`,
+    from_training: trainingId,
+    content: training,
+    approved_by: "USER",
+    created_at: new Date().toISOString(),
+  });
   renderLists(agentId);
   renderAgentMemory();
+}
 
-  alert(passed
-    ? "قبول شد و به حافظه تجربه منتقل شد."
-    : "نمره کافی نبود. به تجربه منتقل نشد.");
+function approveDiscovery(agentId, discoveryId) {
+  const ok = confirm("تأیید می‌کنید این کشف به تجربه منتقل شود؟");
+  if (!ok) return;
+  const d = agentMemory[agentId].discoveries.find((x) => x.id === discoveryId);
+  if (!d) return;
+  d.status = "APPROVED_TO_EXPERIENCE";
+  agentMemory[agentId].experience.push({
+    id: `EXP-${Date.now()}`,
+    from_discovery: discoveryId,
+    content: d.content,
+    approved_by: "USER",
+    created_at: new Date().toISOString(),
+  });
+  renderLists(agentId);
+  renderAgentMemory();
+}
+
+function rejectDiscovery(agentId, discoveryId) {
+  const d = agentMemory[agentId].discoveries.find((x) => x.id === discoveryId);
+  if (!d) return;
+  d.status = "REJECTED";
+  renderLists(agentId);
+}
+
+// Demo helper: agent proposes a discovery (pending)
+function proposeDemoDiscovery(agentId, content) {
+  agentMemory[agentId].discoveries.push({
+    id: `DISCOVERY-${Date.now()}`,
+    content,
+    status: "PENDING_USER_APPROVAL",
+    created_at: new Date().toISOString(),
+  });
+  renderLists(agentId);
 }
 
 function saveTraining() {
@@ -189,11 +257,7 @@ function saveTraining() {
   const content = document.getElementById("trainingContent").value.trim();
   const sourceType = document.getElementById("trainingSourceType").value;
   const fileName = document.getElementById("trainingFile").files?.[0]?.name || null;
-
-  if (!content && !fileName) {
-    alert("متن یا فایل آموزش لازم است.");
-    return;
-  }
+  if (!content && !fileName) return alert("متن یا فایل آموزش لازم است.");
 
   agentMemory[agentId].training.push({
     id: `TRAIN-${Date.now()}`,
@@ -203,10 +267,9 @@ function saveTraining() {
     source: sourceType,
     created_at: new Date().toISOString(),
   });
-
   renderLists(agentId);
   renderAgentMemory();
-  alert("آموزش در حافظه ایجنت ذخیره شد.");
+  alert("آموزش ذخیره شد. برای تجربه باید جداگانه تأیید کنید.");
 }
 
 function submitExam() {
@@ -216,45 +279,27 @@ function submitExam() {
   const score = Number(document.getElementById("examScore").value || 0);
   const feedback = document.getElementById("examFeedback").value.trim();
   const log = document.getElementById("examLog");
+  if (!question) return alert("سؤال امتحان لازم است.");
 
-  if (!question) {
-    alert("سؤال امتحان لازم است.");
-    return;
-  }
-
-  const passed = score >= 0.7;
   const record = {
     agent_id: agentId,
     question,
     expected,
     score,
     feedback,
-    passed,
-    transferred_to_experience: passed,
+    auto_transferred: false,
+    note: "Transfer to experience requires explicit USER approval",
     created_at: new Date().toISOString(),
   };
 
-  if (passed) {
-    agentMemory[agentId].experience.push({
-      id: `EXP-${Date.now()}`,
-      question,
-      expected,
-      score,
-      feedback,
-      passed: true,
-      created_at: record.created_at,
-    });
-  }
-
+  agentMemory[agentId].exams.push(record);
   log.textContent = JSON.stringify(record, null, 2);
   renderLists(agentId);
-  renderAgentMemory();
 }
 
 function renderAgentMemory() {
   const agentId = document.getElementById("memoryAgentSelect")?.value || AGENTS[0].id;
   const mem = agentMemory[agentId];
-
   const tBox = document.getElementById("memoryTrainingList");
   const eBox = document.getElementById("memoryExperienceList");
   if (!tBox || !eBox) return;
@@ -264,7 +309,7 @@ function renderAgentMemory() {
     : `<div class="empty">خالی</div>`;
 
   eBox.innerHTML = mem.experience.length
-    ? mem.experience.map((e) => `<div class="folder-item"><span class="tag ok">n=${e.score}</span>${e.question}</div>`).join("")
+    ? mem.experience.map((e) => `<div class="folder-item"><span class="tag ok">EXP</span>${e.id}</div>`).join("")
     : `<div class="empty">خالی</div>`;
 }
 
@@ -275,12 +320,10 @@ function submitVisualMission() {
   const preview = document.getElementById("missionMediaPreview");
   preview.innerHTML = "";
   const files = [...input.files];
-
   if (!files.length && !note) {
     log.textContent = "هیچ ورودی دیداری یا منبعی ثبت نشد.";
     return;
   }
-
   files.forEach((file) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -290,21 +333,12 @@ function submitVisualMission() {
     };
     reader.readAsDataURL(file);
   });
-
-  const payload = {
+  log.textContent = JSON.stringify({
     type: "VISUAL_MISSION_INPUT",
     source_note: note || null,
     files: files.map((f) => ({ name: f.name, type: f.type, size: f.size })),
     created_at: new Date().toISOString(),
-  };
-  log.textContent = JSON.stringify(payload, null, 2);
-
-  const outputs = document.getElementById("finalOutputs");
-  if (outputs.querySelector(".empty")) outputs.innerHTML = "";
-  const item = document.createElement("div");
-  item.className = "folder-item";
-  item.textContent = `ورودی دیداری — فایل‌ها: ${files.length} — منبع: ${note || "نامشخص"}`;
-  outputs.prepend(item);
+  }, null, 2);
 }
 
 renderEmployees();
