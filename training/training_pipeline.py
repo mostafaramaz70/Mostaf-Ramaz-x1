@@ -1,27 +1,19 @@
 """
 Ramaz X1 Training Pipeline
-Version: 1.0.0
+Version: 1.1.0
 
-Purpose:
-Design the path for User-driven agent training from multiple sources:
-1. PDF files
-2. Telegram channels
-3. Videos
-
-Important:
-- This does NOT inject hardcoded trading concepts.
-- It only prepares and stores training material taught/approved by User.
-- Final acceptance of training into agent memory is controlled by User flow.
+Sources: PDF / Telegram / Video
+Flow: ingest -> PENDING_USER_APPROVAL -> approve -> push_to_agent
 """
 
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import uuid
 
+from training.pdf_extractor import extract_pdf_text
+
 
 class TrainingItem:
-    """Normalized training unit before being sent to an agent."""
-
     def __init__(
         self,
         title: str,
@@ -34,7 +26,7 @@ class TrainingItem:
         self.id = f"TRAIN-SRC-{uuid.uuid4().hex[:8].upper()}"
         self.title = title
         self.content = content
-        self.source_type = source_type  # PDF | TELEGRAM | VIDEO | MANUAL
+        self.source_type = source_type
         self.source_ref = source_ref
         self.tags = tags or []
         self.media_meta = media_meta or {}
@@ -56,48 +48,27 @@ class TrainingItem:
 
 
 class PDFTrainingSource:
-    """
-    PDF training intake.
-
-    Expected flow:
-    1. User uploads PDF
-    2. System extracts text (future: pypdf / pdfplumber)
-    3. User reviews extracted content
-    4. Approved content becomes TrainingItem
-    """
-
     source_type = "PDF"
 
     def ingest(self, file_path: str, title: str = "", tags: Optional[List[str]] = None) -> TrainingItem:
-        # Placeholder extraction layer (to be connected to real PDF parser)
-        extracted_text = (
-            f"[PDF_PLACEHOLDER]\n"
-            f"File: {file_path}\n"
-            f"Extract full text with PDF parser in next integration step.\n"
-            f"User must review and approve before agent training."
-        )
-
+        extracted = extract_pdf_text(file_path)
+        content = extracted.get("text", "")
         return TrainingItem(
             title=title or f"PDF Training - {file_path.split('/')[-1]}",
-            content=extracted_text,
+            content=content,
             source_type=self.source_type,
             source_ref=file_path,
             tags=tags or ["pdf", "user-training"],
-            media_meta={"file_path": file_path, "parser": "pending"},
+            media_meta={
+                "file_path": file_path,
+                "parser_status": extracted.get("status"),
+                "pages": extracted.get("pages", 0),
+                "engine": extracted.get("engine"),
+            },
         )
 
 
 class TelegramTrainingSource:
-    """
-    Telegram channel training intake.
-
-    Expected flow:
-    1. User connects channel / provides export / bot feed
-    2. System collects messages (text, captions)
-    3. User filters relevant educational messages
-    4. Approved messages become TrainingItems
-    """
-
     source_type = "TELEGRAM"
 
     def ingest_channel_message(
@@ -123,9 +94,6 @@ class TelegramTrainingSource:
         )
 
     def ingest_export(self, export_path: str, channel_id: str = "unknown") -> List[TrainingItem]:
-        """
-        Placeholder for Telegram Desktop JSON/HTML export parsing.
-        """
         placeholder = TrainingItem(
             title=f"Telegram Export - {channel_id}",
             content=(
@@ -143,16 +111,6 @@ class TelegramTrainingSource:
 
 
 class VideoTrainingSource:
-    """
-    Video training intake.
-
-    Expected flow:
-    1. User provides video (file/url: YouTube/local)
-    2. System gets transcript (future: whisper / subtitle / manual transcript)
-    3. User reviews transcript
-    4. Approved transcript becomes TrainingItem
-    """
-
     source_type = "VIDEO"
 
     def ingest(
@@ -169,7 +127,6 @@ class VideoTrainingSource:
             f"Transcript pending.\n"
             f"User must provide/approve transcript before agent training."
         )
-
         return TrainingItem(
             title=title or f"Video Training - {video_ref}",
             content=content,
@@ -185,16 +142,6 @@ class VideoTrainingSource:
 
 
 class TrainingPipeline:
-    """
-    Central training path.
-
-    Steps:
-    1. Ingest from PDF / Telegram / Video
-    2. Hold as PENDING_USER_APPROVAL
-    3. User approves
-    4. Push into target agent via agent.receive_training()
-    """
-
     def __init__(self):
         self.pdf = PDFTrainingSource()
         self.telegram = TelegramTrainingSource()
@@ -269,10 +216,6 @@ class TrainingPipeline:
         return self.pending[training_id]
 
     def push_to_agent(self, training_id: str, agent) -> Dict[str, Any]:
-        """
-        Push approved training into agent.receive_training().
-        Agent must implement receive_training().
-        """
         item = self.pending.get(training_id)
         if not item:
             return {"status": "NOT_FOUND", "training_id": training_id}

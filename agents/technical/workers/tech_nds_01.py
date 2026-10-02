@@ -1,21 +1,18 @@
 """
 TECH-NDS-01 — Raw Trainable Employee Agent
 Technical Department
-Version: 2.1.0
-Status: RAW / Ready for Training
+Version: 2.2.0
 
-Rules:
-- User teaches -> Training memory
-- User exams are evaluation only
-- Experience is created ONLY by explicit User approval
-- Discoveries are proposed and stay pending until User decides
-- Experience weight > Training weight at runtime
-- No hardcoded domain concepts
+Uses AgentBrain (RAG + multi-model):
+- Training/Experience recalled via top-k retrieval
+- No full memory dump into prompts
+- Experience only from USER approval path
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 from memory.memory_engine import MemoryEngine
+from core.brain_registry import get_agent_brain
 
 
 class TechNDS01:
@@ -25,16 +22,16 @@ class TechNDS01:
         "agent_type": "Employee",
         "department": "Technical",
         "role": "Trainable Technical Analyst",
-        "version": "2.1.0",
+        "version": "2.2.0",
         "status": "RAW"
     }
 
     RESPONSIBILITIES = [
         "Receive training from User",
-        "Store training in training memory",
+        "Store training in training memory + RAG index",
         "Take User exams (evaluation only)",
         "Propose discoveries for User approval",
-        "Use User-approved training + experience during analysis",
+        "Recall relevant memory via RAG during analysis",
         "Submit report only to TECH-MANAGER"
     ]
 
@@ -51,6 +48,7 @@ class TechNDS01:
     def __init__(self):
         self.identity = self.IDENTITY.copy()
         self.memory_engine = MemoryEngine(agent_id=self.identity["agent_id"])
+        self.brain = get_agent_brain(self.identity["agent_id"])
         self.exam_history: List[Dict[str, Any]] = []
 
     def receive_training(self, training_item: Dict[str, Any]) -> Dict[str, Any]:
@@ -60,19 +58,32 @@ class TechNDS01:
             source=training_item.get("source", "USER"),
             tags=training_item.get("tags", [])
         )
+
+        # Index into persistent RAG brain (chunked)
+        units = self.brain.remember_training(
+            title=training_item.get("title", "Untitled Training"),
+            content=str(training_item.get("content", "")),
+            source_id=training_id,
+            meta={
+                "source": training_item.get("source", "USER"),
+                "tags": training_item.get("tags", []),
+                "source_ref": training_item.get("source_ref"),
+            },
+        )
+
         if self.identity["status"] == "RAW":
             self.identity["status"] = "TRAINING"
-        return {"status": "STORED", "training_id": training_id}
+
+        return {
+            "status": "STORED",
+            "training_id": training_id,
+            "rag_units": len(units)
+        }
 
     def list_training(self) -> List[Dict[str, Any]]:
         return self.memory_engine.get_training()
 
     def take_test(self, test_input: Dict[str, Any], user_evaluation: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Exam/evaluation only.
-        Does NOT write to experience.
-        User must explicitly approve transfer later.
-        """
         exam = {
             "id": f"EXAM-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
             "test_input": test_input,
@@ -93,40 +104,23 @@ class TechNDS01:
             "message": "Exam stored. Experience transfer requires explicit USER approval."
         }
 
-    def propose_discovery(self, content: Any, evidence: List = None, confidence: float = 0.0) -> Dict[str, Any]:
+    def propose_discovery(self, content: Any, evidence: Optional[List] = None, confidence: float = 0.0) -> Dict[str, Any]:
         discovery_id = self.memory_engine.propose_discovery(
             content=content,
             evidence=evidence or [],
             confidence=confidence
+        )
+        self.brain.remember_discovery_pending(
+            title=f"Discovery {discovery_id}",
+            content=str(content),
+            source_id=discovery_id,
+            meta={"confidence": confidence, "evidence": evidence or []},
         )
         return {
             "status": "PENDING_USER_APPROVAL",
             "discovery_id": discovery_id,
             "message": "Discovery proposed. Waiting for USER decision."
         }
-
-    def _retrieve_relevant_training(self, query: str) -> List[Dict[str, Any]]:
-        items = self.memory_engine.get_training()
-        q = (query or "").lower()
-        if not q:
-            return items[-5:]
-        hits = []
-        for item in items:
-            blob = f"{item.get('title','')} {item.get('content','')} {' '.join(item.get('tags', []))}".lower()
-            if q in blob:
-                hits.append(item)
-        return hits[-5:] if hits else items[-3:]
-
-    def _retrieve_relevant_experience(self, query: str) -> List[Dict[str, Any]]:
-        items = self.memory_engine.get_experience()
-        q = (query or "").lower()
-        if not q:
-            return items[-5:]
-        hits = []
-        for exp in items:
-            if q in str(exp.get("content", "")).lower():
-                hits.append(exp)
-        return hits[-5:] if hits else items[-3:]
 
     def analyze(self, mission_input: Dict[str, Any]) -> Dict[str, Any]:
         self.memory_engine.add_working(mission_input, meta={"type": "mission_input"})
@@ -135,8 +129,16 @@ class TechNDS01:
         raw_input = mission_input.get("input", mission_input)
         query = f"{objective} {raw_input}"
 
-        training_hits = self._retrieve_relevant_training(query)
-        experience_hits = self._retrieve_relevant_experience(query)
+        # RAG recall instead of dumping full memory
+        context_pack = self.brain.recall(
+            query=query,
+            top_k=5,
+            kinds=["training", "experience"]
+        )
+
+        units = context_pack.get("units", [])
+        training_hits = [u for u in units if u.get("kind") == "training"]
+        experience_hits = [u for u in units if u.get("kind") == "experience"]
 
         has_training = len(training_hits) > 0
         has_experience = len(experience_hits) > 0
@@ -145,34 +147,34 @@ class TechNDS01:
         if has_training:
             confidence += 0.25
         if has_experience:
-            scores = []
-            for exp in experience_hits:
-                content = exp.get("content", {})
-                if isinstance(content, dict):
-                    scores.append(float(content.get("score", exp.get("confidence", 0))))
-                else:
-                    scores.append(float(exp.get("confidence", 0)))
-            avg_exp = sum(scores) / len(scores) if scores else 0.3
-            confidence += min(0.65, 0.40 + avg_exp * 0.25)
-
+            scores = [float(u.get("score", 0)) for u in experience_hits]
+            avg = sum(scores) / len(scores) if scores else 0.3
+            confidence += min(0.65, 0.40 + avg * 0.25)
         confidence = round(min(confidence, 0.95), 2)
 
         if not has_training and not has_experience:
-            summary = "Agent is RAW. No training and no user-approved experience yet."
+            summary = "Agent is RAW. No relevant training/experience retrieved from memory brain."
             recommendation = "NO_TRADE"
             basis = "NONE"
         elif has_experience and has_training:
-            summary = "Prepared from training + user-approved experience. Experience weighted higher."
+            summary = "Prepared from retrieved training + user-approved experience (RAG top-k)."
             recommendation = "WAIT_USER_VALIDATION"
             basis = "TRAINING+EXPERIENCE"
         elif has_experience:
-            summary = "Prepared mainly from user-approved experience."
+            summary = "Prepared mainly from retrieved user-approved experience."
             recommendation = "WAIT_USER_VALIDATION"
             basis = "EXPERIENCE"
         else:
-            summary = "Only training available. Experience requires explicit USER approval."
+            summary = "Only training fragments retrieved. Experience requires USER approval."
             recommendation = "WAIT_USER_VALIDATION"
             basis = "TRAINING_ONLY"
+
+        # Optional model prompt pack (for connected LLMs)
+        prompt_pack = self.brain.build_model_prompt(
+            task="Analyze mission using only retrieved training and user-approved experience.",
+            query=query,
+            top_k=5,
+        )
 
         result = {
             "agent_id": self.identity["agent_id"],
@@ -181,23 +183,31 @@ class TechNDS01:
             "output_type": "Analysis",
             "agent_state": self.identity["status"],
             "analysis": {
-                "method": "TRAINING_AND_USER_APPROVED_EXPERIENCE",
+                "method": "RAG_TRAINING_AND_USER_APPROVED_EXPERIENCE",
                 "basis": basis,
                 "training_used_count": len(training_hits),
                 "experience_used_count": len(experience_hits),
                 "training_refs": [t.get("id") for t in training_hits],
                 "experience_refs": [e.get("id") for e in experience_hits],
+                "retrieved_memory": units,
                 "summary": summary,
                 "notes": [
                     "No hardcoded domain rules are embedded.",
+                    "Only RAG top-k memory injected for efficiency.",
                     "Experience must be explicitly approved by USER."
                 ]
             },
+            "model_prompt_pack": {
+                "selected_model": prompt_pack.get("selected_model"),
+                "retrieved_count": context_pack.get("retrieved_count"),
+                "embedder": context_pack.get("embedder"),
+                "persistent": context_pack.get("persistent"),
+            },
             "confidence": confidence,
             "evidence": [
-                f"Training items used: {len(training_hits)}",
-                f"Experience items used: {len(experience_hits)}",
-                "Experience weight > Training weight"
+                f"Training fragments used: {len(training_hits)}",
+                f"Experience fragments used: {len(experience_hits)}",
+                "RAG retrieval active"
             ],
             "limitations": [
                 "Skill depends on User training quality",
@@ -229,6 +239,7 @@ class TechNDS01:
             "evidence": analysis_result.get("evidence", []),
             "limitations": analysis_result.get("limitations", []),
             "recommendation": analysis_result.get("recommendation"),
+            "model_prompt_pack": analysis_result.get("model_prompt_pack"),
             "validation": "PENDING",
             "status": analysis_result.get("status"),
             "timestamp": datetime.utcnow().isoformat()
