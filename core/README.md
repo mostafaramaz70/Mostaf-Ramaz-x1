@@ -1,17 +1,14 @@
-# Agent Brain + RAG Memory v2
+# Agent Brain + RAG + Model Router
 
-## ارتقاها
-1. Persistent storage با SQLite (`data/rag/<agent_id>.sqlite3`)
-2. Embedding قابل تعویض:
-   - پیش‌فرض: `local_hash` (بدون وابستگی)
-   - اختیاری: OpenAI با `OPENAI_API_KEY`
-3. Chunking برای متن‌های بلند/PDF/transcript
+## Persistence
+- RAG memory: `data/rag/<agent_id>.sqlite3`
+- Model/API configs: `data/models/agent_models.sqlite3`
 
-## متغیر محیطی
-- `RAMAZ_EMBEDDING_PROVIDER=auto|local|openai`
-- `OPENAI_API_KEY=...` (اگر openai بخواهید)
+## Model switching
+- Attach multiple APIs/models per agent
+- User switch: `/models/switch`
+- Auto failover on RATE_LIMITED / QUOTA_EXCEEDED / ERROR
+- Active model persisted in DB
 
-## نتیجه
-- حافظه با ری‌استارت از بین نمی‌رود
-- مدل جدید همان DB را استفاده می‌کند
-- فقط top-k مرتبط وارد پرامپت می‌شود
+## Note
+API secrets should be referenced by `api_key_ref` (env/secret manager), not stored as raw keys in DB.
