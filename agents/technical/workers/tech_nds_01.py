@@ -1,16 +1,16 @@
 """
 TECH-NDS-01 — Raw Trainable Employee Agent
 Technical Department
-Version: 2.0.0
+Version: 2.1.0
 Status: RAW / Ready for Training
 
-Project rule:
-- Agent starts RAW
+Rules:
 - User teaches -> Training memory
-- User tests -> Experience memory
-- Runtime uses Training + Experience
-- Experience has higher weight than Training
-- No hardcoded domain concepts (BOS/CHoCH/etc.)
+- User exams are evaluation only
+- Experience is created ONLY by explicit User approval
+- Discoveries are proposed and stay pending until User decides
+- Experience weight > Training weight at runtime
+- No hardcoded domain concepts
 """
 
 from typing import Dict, Any, List
@@ -25,22 +25,23 @@ class TechNDS01:
         "agent_type": "Employee",
         "department": "Technical",
         "role": "Trainable Technical Analyst",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "status": "RAW"
     }
 
     RESPONSIBILITIES = [
         "Receive training from User",
         "Store training in training memory",
-        "Take User tests and convert them into experience",
-        "Use training + experience during analysis",
-        "Weight experience higher than training",
+        "Take User exams (evaluation only)",
+        "Propose discoveries for User approval",
+        "Use User-approved training + experience during analysis",
         "Submit report only to TECH-MANAGER"
     ]
 
     RESTRICTIONS = [
         "No hardcoded domain trading concepts",
-        "Cannot invent knowledge not taught or experienced",
+        "Cannot auto-promote training/discovery to experience",
+        "Cannot invent knowledge not taught or user-approved",
         "Cannot communicate with other employees",
         "Cannot communicate with Assistant",
         "Cannot execute trades",
@@ -50,15 +51,17 @@ class TechNDS01:
     def __init__(self):
         self.identity = self.IDENTITY.copy()
         self.memory_engine = MemoryEngine(agent_id=self.identity["agent_id"])
+        self.exam_history: List[Dict[str, Any]] = []
 
     def receive_training(self, training_item: Dict[str, Any]) -> Dict[str, Any]:
-        """User teaches the agent."""
         training_id = self.memory_engine.add_training(
             content=training_item.get("content", ""),
             title=training_item.get("title", "Untitled Training"),
             source=training_item.get("source", "USER"),
             tags=training_item.get("tags", [])
         )
+        if self.identity["status"] == "RAW":
+            self.identity["status"] = "TRAINING"
         return {"status": "STORED", "training_id": training_id}
 
     def list_training(self) -> List[Dict[str, Any]]:
@@ -66,32 +69,40 @@ class TechNDS01:
 
     def take_test(self, test_input: Dict[str, Any], user_evaluation: Dict[str, Any]) -> Dict[str, Any]:
         """
-        User tests the agent.
-        Evaluation becomes Experience.
+        Exam/evaluation only.
+        Does NOT write to experience.
+        User must explicitly approve transfer later.
         """
-        experience = {
+        exam = {
+            "id": f"EXAM-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
             "test_input": test_input,
             "agent_response": test_input.get("agent_response"),
             "user_evaluation": user_evaluation,
             "score": float(user_evaluation.get("score", 0)),
             "feedback": user_evaluation.get("feedback", ""),
+            "auto_transferred_to_experience": False,
             "timestamp": datetime.utcnow().isoformat()
         }
-
-        exp_id = self.memory_engine.add_experience(
-            content=experience,
-            mission_id=test_input.get("mission_id", "USER-TEST"),
-            confidence=float(user_evaluation.get("score", 0))
-        )
-
-        # If agent has any training or experience, leave pure RAW label conceptually
-        if self.identity["status"] == "RAW":
-            self.identity["status"] = "TRAINING"
+        self.exam_history.append(exam)
+        self.memory_engine.add_working(exam, meta={"type": "exam_evaluation"})
 
         return {
-            "status": "EXPERIENCE_CREATED",
-            "experience_id": exp_id,
-            "score": experience["score"]
+            "status": "EXAM_RECORDED",
+            "exam_id": exam["id"],
+            "score": exam["score"],
+            "message": "Exam stored. Experience transfer requires explicit USER approval."
+        }
+
+    def propose_discovery(self, content: Any, evidence: List = None, confidence: float = 0.0) -> Dict[str, Any]:
+        discovery_id = self.memory_engine.propose_discovery(
+            content=content,
+            evidence=evidence or [],
+            confidence=confidence
+        )
+        return {
+            "status": "PENDING_USER_APPROVAL",
+            "discovery_id": discovery_id,
+            "message": "Discovery proposed. Waiting for USER decision."
         }
 
     def _retrieve_relevant_training(self, query: str) -> List[Dict[str, Any]]:
@@ -118,7 +129,6 @@ class TechNDS01:
         return hits[-5:] if hits else items[-3:]
 
     def analyze(self, mission_input: Dict[str, Any]) -> Dict[str, Any]:
-        """Use only Training + Experience. Experience has higher weight."""
         self.memory_engine.add_working(mission_input, meta={"type": "mission_input"})
 
         objective = str(mission_input.get("objective", ""))
@@ -148,19 +158,19 @@ class TechNDS01:
         confidence = round(min(confidence, 0.95), 2)
 
         if not has_training and not has_experience:
-            summary = "Agent is RAW. No training and no experience yet. User must teach and test first."
+            summary = "Agent is RAW. No training and no user-approved experience yet."
             recommendation = "NO_TRADE"
             basis = "NONE"
         elif has_experience and has_training:
-            summary = "Prepared from training + experience. Experience weighted higher."
+            summary = "Prepared from training + user-approved experience. Experience weighted higher."
             recommendation = "WAIT_USER_VALIDATION"
             basis = "TRAINING+EXPERIENCE"
         elif has_experience:
-            summary = "Prepared mainly from experience."
+            summary = "Prepared mainly from user-approved experience."
             recommendation = "WAIT_USER_VALIDATION"
             basis = "EXPERIENCE"
         else:
-            summary = "Only training available. User testing is required to build experience."
+            summary = "Only training available. Experience requires explicit USER approval."
             recommendation = "WAIT_USER_VALIDATION"
             basis = "TRAINING_ONLY"
 
@@ -171,7 +181,7 @@ class TechNDS01:
             "output_type": "Analysis",
             "agent_state": self.identity["status"],
             "analysis": {
-                "method": "TRAINING_AND_EXPERIENCE",
+                "method": "TRAINING_AND_USER_APPROVED_EXPERIENCE",
                 "basis": basis,
                 "training_used_count": len(training_hits),
                 "experience_used_count": len(experience_hits),
@@ -180,7 +190,7 @@ class TechNDS01:
                 "summary": summary,
                 "notes": [
                     "No hardcoded domain rules are embedded.",
-                    "Knowledge must come from User training and tested experience."
+                    "Experience must be explicitly approved by USER."
                 ]
             },
             "confidence": confidence,
@@ -191,8 +201,8 @@ class TechNDS01:
             ],
             "limitations": [
                 "Skill depends on User training quality",
-                "Without tests, experience remains weak",
-                "No autonomous concept invention allowed"
+                "Experience only includes USER-approved items",
+                "No autonomous promotion to experience"
             ],
             "recommendation": {
                 "action": recommendation,
