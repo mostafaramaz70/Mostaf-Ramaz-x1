@@ -1,6 +1,6 @@
 """
 Ramaz X1 Backend - FastAPI
-Version: 1.4.0
+Version: 1.4.1
 """
 
 import sys
@@ -10,6 +10,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
 from datetime import datetime
@@ -28,7 +29,15 @@ from core.brain_registry import get_agent_brain
 app = FastAPI(
     title="Ramaz X1 API",
     description="Multi-Agent AI Trading Operating System",
-    version="1.4.0",
+    version="1.4.1",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 runtime = RuntimeCore()
@@ -105,7 +114,7 @@ class ModelHealthRequest(BaseModel):
     agent_id: str
     model_ref_id: str
     error: str = ""
-    error_type: str = "ERROR"  # RATE_LIMITED | QUOTA_EXCEEDED | ERROR
+    error_type: str = "ERROR"
 
 
 class RecallRequest(BaseModel):
@@ -134,7 +143,7 @@ class VisualMissionRequest(BaseModel):
 def root():
     return {
         "system": "Ramaz X1",
-        "version": "1.4.0",
+        "version": "1.4.1",
         "status": runtime.status(),
         "timestamp": datetime.utcnow().isoformat(),
     }
@@ -172,16 +181,11 @@ def list_models(agent_id: str):
     if not registry.get(agent_id):
         raise HTTPException(status_code=404, detail="Agent not found")
     brain = get_agent_brain(agent_id)
-    return {
-        "agent_id": agent_id,
-        "active": brain.models.get_active(),
-        "models": brain.models.list_models(),
-    }
+    return {"agent_id": agent_id, "active": brain.models.get_active(), "models": brain.models.list_models()}
 
 
 @app.post("/models/switch")
 def switch_model(req: SwitchModelRequest):
-    """User switches agent to another attached API/model."""
     if not registry.get(req.agent_id):
         raise HTTPException(status_code=404, detail="Agent not found")
     brain = get_agent_brain(req.agent_id)
@@ -195,21 +199,14 @@ def switch_model(req: SwitchModelRequest):
 
 @app.post("/models/mark-failure")
 def mark_model_failure(req: ModelHealthRequest):
-    """Mark API exhausted / rate-limited / error and allow failover."""
     if not registry.get(req.agent_id):
         raise HTTPException(status_code=404, detail="Agent not found")
     brain = get_agent_brain(req.agent_id)
     marked = brain.models.mark_failure(req.model_ref_id, error=req.error, error_type=req.error_type)
     if marked.get("status") == "NOT_FOUND":
         raise HTTPException(status_code=404, detail="Model not found")
-
-    # try auto failover
     selected = brain.models.select(allow_failover=True)
-    return {
-        "status": "UPDATED",
-        "marked": marked,
-        "active_after": selected,
-    }
+    return {"status": "UPDATED", "marked": marked, "active_after": selected}
 
 
 @app.post("/models/mark-success")

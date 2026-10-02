@@ -1,17 +1,29 @@
 # Ramaz X1 Frontend
 
-## سربرگ‌ها
-1. معاون
-2. اداره‌ها
-3. خروجی‌ها
-4. آموزش
+## اتصال به Backend
+پیش‌فرض:
+```
+http://127.0.0.1:8000
+```
 
-## آموزش ایجنت‌ها
-- بارگذاری آموزش برای هر ایجنت (متن / فایل PDF / تصویر / ویدیو)
-- امتحان گرفتن از ایجنت
-- اگر نمره >= 0.7 باشد، به Experience منتقل می‌شود
-- Training و Experience در حافظه همان ایجنت ذخیره می‌شود
+برای تغییر:
+```js
+localStorage.setItem('RAMAZ_API_BASE', 'http://127.0.0.1:8000')
+```
 
-## نکته
-فعلاً حافظه در مرورگر (local UI store) است.
-در مرحله بعد به Backend و MemoryEngine متصل می‌شود.
+## قابلیت‌های متصل به API
+- وضعیت سیستم: `GET /`
+- ذخیره آموزش: `POST /training`
+- لیست آموزش/تجربه: `GET /training/{id}` , `GET /experience/{id}`
+- انتقال به تجربه با تأیید کاربر: `POST /experience/from-training`
+- کشف‌ها: approve/reject
+- اتصال و تعویض مدل: `/models/attach` , `/models/switch`
+- ورودی دیداری مأموریت: `POST /missions/visual`
+
+## اجرا
+1. Backend:
+```bash
+cd backend
+py -m uvicorn main:app --reload
+```
+2. باز کردن `frontend/index.html` در مرورگر

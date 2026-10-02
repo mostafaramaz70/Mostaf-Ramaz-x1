@@ -1,3 +1,5 @@
+const API_BASE = localStorage.getItem("RAMAZ_API_BASE") || "http://127.0.0.1:8000";
+
 const AGENTS = [
   { id: "ASSISTANT-NDS", name: "معاون", type: "Assistant" },
   { id: "TECH-MANAGER", name: "رئیس تکنیکال", type: "Manager" },
@@ -13,12 +15,34 @@ const AGENTS = [
   { id: "FUND-TG-01", name: "Telegram Worker", type: "Employee", dept: "fundamental" },
 ];
 
-// Local UI memory (backend is source of truth when connected)
+// Cache for UI lists (source of truth = backend)
 const agentMemory = {};
 AGENTS.forEach((a) => {
   agentMemory[a.id] = { training: [], experience: [], discoveries: [], exams: [] };
 });
 
+async function api(path, options = {}) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    ...options,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+  const ct = res.headers.get("content-type") || "";
+  if (ct.includes("application/json")) return res.json();
+  return res.text();
+}
+
+function setStatus(ok, text) {
+  const el = document.getElementById("systemStatus");
+  if (!el) return;
+  el.textContent = text;
+  el.className = "status-badge " + (ok ? "ok" : "err");
+}
+
+// Tabs
 document.querySelectorAll(".tab-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
@@ -44,7 +68,7 @@ function trainingMiniUI(agentId) {
       <input type="text" placeholder="عنوان آموزش" id="title-${agentId}" />
       <textarea rows="3" placeholder="متن آموزش" id="content-${agentId}"></textarea>
       <input type="file" id="file-${agentId}" accept=".pdf,image/*,video/*" />
-      <button class="btn" onclick="saveTrainingFor('${agentId}')">ذخیره آموزش</button>
+      <button class="btn" onclick="saveTrainingFor('${agentId}')">ذخیره آموزش در Backend</button>
       <div class="folder-list" id="list-train-${agentId}"><div class="empty">آموزشی ثبت نشده</div></div>
 
       <h3 style="font-size:13px;color:#c7d2fe;margin-top:8px">امتحان (فقط ارزیابی)</h3>
@@ -63,6 +87,13 @@ function trainingMiniUI(agentId) {
 
       <h3 style="font-size:13px;color:#c7d2fe;margin-top:8px">تجربه‌ها</h3>
       <div class="folder-list" id="list-exp-${agentId}"><div class="empty">تجربه‌ای ثبت نشده</div></div>
+
+      <h3 style="font-size:13px;color:#c7d2fe;margin-top:8px">مدل / API فعال</h3>
+      <div class="folder-list" id="list-models-${agentId}"><div class="empty">مدلی متصل نیست</div></div>
+      <input type="text" id="model-name-${agentId}" placeholder="نام مدل مثلا OpenAI-A" />
+      <input type="text" id="model-provider-${agentId}" placeholder="provider مثلا openai" />
+      <input type="text" id="model-id-${agentId}" placeholder="model_id مثلا gpt-4.1" />
+      <button class="btn" onclick="attachModelFor('${agentId}')">اتصال مدل به Backend</button>
     </div>
   `;
 }
@@ -101,8 +132,6 @@ function renderEmployees() {
     const node = document.getElementById(el);
     if (node) node.innerHTML = trainingMiniUI(id);
   });
-
-  AGENTS.forEach((a) => renderLists(a.id));
 }
 
 function fillAgentSelects() {
@@ -114,36 +143,36 @@ function fillAgentSelects() {
 }
 
 function renderLists(agentId) {
-  const mem = agentMemory[agentId];
+  const mem = agentMemory[agentId] || { training: [], experience: [], discoveries: [], exams: [], models: [] };
 
   const tList = document.getElementById(`list-train-${agentId}`);
   if (tList) {
     tList.innerHTML = mem.training.length
-      ? mem.training.map((t) => `<div class="folder-item"><span class="tag">TRAIN</span>${t.title} <small>(${t.id})</small></div>`).join("")
+      ? mem.training.map((t) => `<div class="folder-item"><span class="tag">TRAIN</span>${t.title || t.id} <small>(${t.id})</small></div>`).join("")
       : `<div class="empty">آموزشی ثبت نشده</div>`;
   }
 
   const promote = document.getElementById(`promote-train-${agentId}`);
   if (promote) {
     promote.innerHTML = mem.training.length
-      ? mem.training.map((t) => `<option value="${t.id}">${t.title}</option>`).join("")
+      ? mem.training.map((t) => `<option value="${t.id}">${t.title || t.id}</option>`).join("")
       : `<option value="">آموزشی نیست</option>`;
   }
 
   const examList = document.getElementById(`list-exam-${agentId}`);
   if (examList) {
     examList.innerHTML = mem.exams.length
-      ? mem.exams.map((e) => `<div class="folder-item"><span class="tag warn">EXAM</span>نمره ${e.score} — ${e.question}</div>`).join("")
+      ? mem.exams.map((e) => `<div class="folder-item"><span class="tag warn">EXAM</span>نمره ${e.score} — ${e.question || ""}</div>`).join("")
       : `<div class="empty">امتحانی ثبت نشده</div>`;
   }
 
   const dList = document.getElementById(`list-disc-${agentId}`);
   if (dList) {
-    const pending = mem.discoveries.filter((d) => d.status === "PENDING_USER_APPROVAL");
+    const pending = (mem.discoveries || []).filter((d) => d.status === "PENDING_USER_APPROVAL");
     dList.innerHTML = pending.length
       ? pending.map((d) => `
           <div class="folder-item">
-            <div><span class="tag warn">DISCOVERY</span>${JSON.stringify(d.content)}</div>
+            <div><span class="tag warn">DISCOVERY</span>${typeof d.content === "string" ? d.content : JSON.stringify(d.content)}</div>
             <button class="btn" onclick="approveDiscovery('${agentId}','${d.id}')">تأیید کاربر → تجربه</button>
             <button class="btn" onclick="rejectDiscovery('${agentId}','${d.id}')">رد کشف</button>
           </div>`).join("")
@@ -156,24 +185,82 @@ function renderLists(agentId) {
       ? mem.experience.map((e) => `<div class="folder-item"><span class="tag ok">EXP</span>${e.id}</div>`).join("")
       : `<div class="empty">تجربه‌ای ثبت نشده</div>`;
   }
+
+  const mList = document.getElementById(`list-models-${agentId}`);
+  if (mList) {
+    const models = mem.models || [];
+    mList.innerHTML = models.length
+      ? models.map((m) => `
+          <div class="folder-item">
+            <span class="tag ${m.is_active ? "ok" : ""}">${m.is_active ? "ACTIVE" : m.status || "MODEL"}</span>
+            ${m.name || m.model_id} (${m.provider})
+            ${!m.is_active ? `<button class="btn" onclick="switchModelFor('${agentId}','${m.id}')">فعال کردن</button>` : ""}
+          </div>`).join("")
+      : `<div class="empty">مدلی متصل نیست</div>`;
+  }
 }
 
-function saveTrainingFor(agentId) {
+async function refreshAgentData(agentId) {
+  try {
+    const [training, experience, discoveries, modelsResp] = await Promise.all([
+      api(`/training/${agentId}`).catch(() => []),
+      api(`/experience/${agentId}`).catch(() => []),
+      api(`/discoveries/${agentId}/pending`).catch(() => []),
+      api(`/models/${agentId}`).catch(() => ({ models: [] })),
+    ]);
+
+    agentMemory[agentId] = {
+      training: training || [],
+      experience: experience || [],
+      discoveries: discoveries || [],
+      exams: agentMemory[agentId]?.exams || [],
+      models: modelsResp.models || [],
+    };
+    renderLists(agentId);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function refreshAllAgents() {
+  for (const a of AGENTS) {
+    await refreshAgentData(a.id);
+  }
+  await renderAgentMemory();
+}
+
+async function loadSystem() {
+  try {
+    const data = await api("/");
+    setStatus(true, `Backend: ${data.status || "ok"}`);
+  } catch (e) {
+    setStatus(false, "Backend قطع است");
+  }
+}
+
+async function saveTrainingFor(agentId) {
   const title = (document.getElementById(`title-${agentId}`)?.value || "").trim() || "آموزش بدون عنوان";
   const content = (document.getElementById(`content-${agentId}`)?.value || "").trim();
   const fileName = document.getElementById(`file-${agentId}`)?.files?.[0]?.name || null;
   if (!content && !fileName) return alert("متن آموزش یا فایل لازم است.");
 
-  agentMemory[agentId].training.push({
-    id: `TRAIN-${Date.now()}`,
-    title,
-    content,
-    fileName,
-    source: "USER",
-    created_at: new Date().toISOString(),
-  });
-  renderLists(agentId);
-  renderAgentMemory();
+  try {
+    await api("/training", {
+      method: "POST",
+      body: JSON.stringify({
+        agent_id: agentId,
+        title,
+        content: content || `[FILE] ${fileName}`,
+        source: "USER",
+        tags: fileName ? ["file", fileName] : ["manual"],
+      }),
+    });
+    await refreshAgentData(agentId);
+    await renderAgentMemory();
+    alert("آموزش در Backend ذخیره شد.");
+  } catch (e) {
+    alert("خطا در ذخیره آموزش: " + e.message);
+  }
 }
 
 function examFor(agentId) {
@@ -182,7 +269,8 @@ function examFor(agentId) {
   const feedback = (document.getElementById(`fb-${agentId}`)?.value || "").trim();
   if (!question) return alert("سؤال امتحان لازم است.");
 
-  // Exam is evaluation only. NO auto transfer to experience.
+  // Exam remains local evaluation record; promotion is explicit user action via backend
+  agentMemory[agentId].exams = agentMemory[agentId].exams || [];
   agentMemory[agentId].exams.push({
     id: `EXAM-${Date.now()}`,
     question,
@@ -194,64 +282,103 @@ function examFor(agentId) {
   alert("نتیجه امتحان ثبت شد. انتقال به تجربه فقط با تأیید جداگانه کاربر انجام می‌شود.");
 }
 
-function promoteTraining(agentId) {
+async function promoteTraining(agentId) {
   const trainingId = document.getElementById(`promote-train-${agentId}`)?.value;
   if (!trainingId) return alert("آموزشی برای انتقال انتخاب نشده است.");
 
-  const training = agentMemory[agentId].training.find((t) => t.id === trainingId);
-  if (!training) return alert("آموزش پیدا نشد.");
-
-  // USER explicit approval required
   const ok = confirm("آیا تأیید می‌کنید این آموزش به تجربه منتقل شود؟");
   if (!ok) return;
 
-  agentMemory[agentId].experience.push({
-    id: `EXP-${Date.now()}`,
-    from_training: trainingId,
-    content: training,
-    approved_by: "USER",
-    created_at: new Date().toISOString(),
-  });
-  renderLists(agentId);
-  renderAgentMemory();
+  try {
+    await api("/experience/from-training", {
+      method: "POST",
+      body: JSON.stringify({
+        agent_id: agentId,
+        training_id: trainingId,
+        approved_by: "USER",
+      }),
+    });
+    await refreshAgentData(agentId);
+    await renderAgentMemory();
+    alert("با تأیید کاربر به تجربه منتقل شد.");
+  } catch (e) {
+    alert("خطا در انتقال: " + e.message);
+  }
 }
 
-function approveDiscovery(agentId, discoveryId) {
+async function approveDiscovery(agentId, discoveryId) {
   const ok = confirm("تأیید می‌کنید این کشف به تجربه منتقل شود؟");
   if (!ok) return;
-  const d = agentMemory[agentId].discoveries.find((x) => x.id === discoveryId);
-  if (!d) return;
-  d.status = "APPROVED_TO_EXPERIENCE";
-  agentMemory[agentId].experience.push({
-    id: `EXP-${Date.now()}`,
-    from_discovery: discoveryId,
-    content: d.content,
-    approved_by: "USER",
-    created_at: new Date().toISOString(),
-  });
-  renderLists(agentId);
-  renderAgentMemory();
+  try {
+    await api("/discoveries/approve", {
+      method: "POST",
+      body: JSON.stringify({
+        agent_id: agentId,
+        discovery_id: discoveryId,
+        decided_by: "USER",
+      }),
+    });
+    await refreshAgentData(agentId);
+    await renderAgentMemory();
+  } catch (e) {
+    alert("خطا: " + e.message);
+  }
 }
 
-function rejectDiscovery(agentId, discoveryId) {
-  const d = agentMemory[agentId].discoveries.find((x) => x.id === discoveryId);
-  if (!d) return;
-  d.status = "REJECTED";
-  renderLists(agentId);
+async function rejectDiscovery(agentId, discoveryId) {
+  try {
+    await api("/discoveries/reject", {
+      method: "POST",
+      body: JSON.stringify({
+        agent_id: agentId,
+        discovery_id: discoveryId,
+        reason: "Rejected by USER",
+        decided_by: "USER",
+      }),
+    });
+    await refreshAgentData(agentId);
+  } catch (e) {
+    alert("خطا: " + e.message);
+  }
 }
 
-// Demo helper: agent proposes a discovery (pending)
-function proposeDemoDiscovery(agentId, content) {
-  agentMemory[agentId].discoveries.push({
-    id: `DISCOVERY-${Date.now()}`,
-    content,
-    status: "PENDING_USER_APPROVAL",
-    created_at: new Date().toISOString(),
-  });
-  renderLists(agentId);
+async function attachModelFor(agentId) {
+  const name = (document.getElementById(`model-name-${agentId}`)?.value || "").trim() || "model";
+  const provider = (document.getElementById(`model-provider-${agentId}`)?.value || "").trim() || "openai";
+  const modelId = (document.getElementById(`model-id-${agentId}`)?.value || "").trim() || "gpt-4.1";
+
+  try {
+    await api("/models/attach", {
+      method: "POST",
+      body: JSON.stringify({
+        agent_id: agentId,
+        name,
+        provider,
+        model_id: modelId,
+        role: "primary",
+        set_active: true,
+      }),
+    });
+    await refreshAgentData(agentId);
+    alert("مدل به Backend متصل و ذخیره شد.");
+  } catch (e) {
+    alert("خطا در اتصال مدل: " + e.message);
+  }
 }
 
-function saveTraining() {
+async function switchModelFor(agentId, modelRefId) {
+  try {
+    await api("/models/switch", {
+      method: "POST",
+      body: JSON.stringify({ agent_id: agentId, model_ref_id: modelRefId }),
+    });
+    await refreshAgentData(agentId);
+  } catch (e) {
+    alert("خطا در تعویض مدل: " + e.message);
+  }
+}
+
+async function saveTraining() {
   const agentId = document.getElementById("trainingAgentSelect").value;
   const title = document.getElementById("trainingTitle").value.trim() || "آموزش بدون عنوان";
   const content = document.getElementById("trainingContent").value.trim();
@@ -259,17 +386,23 @@ function saveTraining() {
   const fileName = document.getElementById("trainingFile").files?.[0]?.name || null;
   if (!content && !fileName) return alert("متن یا فایل آموزش لازم است.");
 
-  agentMemory[agentId].training.push({
-    id: `TRAIN-${Date.now()}`,
-    title,
-    content,
-    fileName,
-    source: sourceType,
-    created_at: new Date().toISOString(),
-  });
-  renderLists(agentId);
-  renderAgentMemory();
-  alert("آموزش ذخیره شد. برای تجربه باید جداگانه تأیید کنید.");
+  try {
+    await api("/training", {
+      method: "POST",
+      body: JSON.stringify({
+        agent_id: agentId,
+        title,
+        content: content || `[FILE] ${fileName}`,
+        source: sourceType,
+        tags: fileName ? [sourceType.toLowerCase(), fileName] : [sourceType.toLowerCase()],
+      }),
+    });
+    await refreshAgentData(agentId);
+    await renderAgentMemory();
+    alert("آموزش در Backend ذخیره شد.");
+  } catch (e) {
+    alert("خطا: " + e.message);
+  }
 }
 
 function submitExam() {
@@ -288,42 +421,58 @@ function submitExam() {
     score,
     feedback,
     auto_transferred: false,
-    note: "Transfer to experience requires explicit USER approval",
+    note: "Transfer to experience requires explicit USER approval via promote endpoint",
     created_at: new Date().toISOString(),
   };
 
+  agentMemory[agentId].exams = agentMemory[agentId].exams || [];
   agentMemory[agentId].exams.push(record);
   log.textContent = JSON.stringify(record, null, 2);
   renderLists(agentId);
 }
 
-function renderAgentMemory() {
+async function renderAgentMemory() {
   const agentId = document.getElementById("memoryAgentSelect")?.value || AGENTS[0].id;
-  const mem = agentMemory[agentId];
   const tBox = document.getElementById("memoryTrainingList");
   const eBox = document.getElementById("memoryExperienceList");
   if (!tBox || !eBox) return;
 
-  tBox.innerHTML = mem.training.length
-    ? mem.training.map((t) => `<div class="folder-item"><span class="tag">${t.source || "USER"}</span>${t.title}</div>`).join("")
-    : `<div class="empty">خالی</div>`;
+  try {
+    const [training, experience] = await Promise.all([
+      api(`/training/${agentId}`),
+      api(`/experience/${agentId}`),
+    ]);
 
-  eBox.innerHTML = mem.experience.length
-    ? mem.experience.map((e) => `<div class="folder-item"><span class="tag ok">EXP</span>${e.id}</div>`).join("")
-    : `<div class="empty">خالی</div>`;
+    agentMemory[agentId].training = training || [];
+    agentMemory[agentId].experience = experience || [];
+
+    tBox.innerHTML = (training || []).length
+      ? training.map((t) => `<div class="folder-item"><span class="tag">${t.source || "USER"}</span>${t.title || t.id}</div>`).join("")
+      : `<div class="empty">خالی</div>`;
+
+    eBox.innerHTML = (experience || []).length
+      ? experience.map((e) => `<div class="folder-item"><span class="tag ok">EXP</span>${e.id}</div>`).join("")
+      : `<div class="empty">خالی</div>`;
+  } catch (e) {
+    tBox.innerHTML = `<div class="empty">Backend قطع است</div>`;
+    eBox.innerHTML = `<div class="empty">Backend قطع است</div>`;
+  }
 }
 
-function submitVisualMission() {
+async function submitVisualMission() {
   const input = document.getElementById("missionMediaInput");
   const note = document.getElementById("missionSourceNote").value.trim();
   const log = document.getElementById("missionIntakeLog");
   const preview = document.getElementById("missionMediaPreview");
   preview.innerHTML = "";
   const files = [...input.files];
+
   if (!files.length && !note) {
     log.textContent = "هیچ ورودی دیداری یا منبعی ثبت نشد.";
     return;
   }
+
+  // preview locally
   files.forEach((file) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -333,14 +482,35 @@ function submitVisualMission() {
     };
     reader.readAsDataURL(file);
   });
-  log.textContent = JSON.stringify({
-    type: "VISUAL_MISSION_INPUT",
+
+  const payload = {
     source_note: note || null,
     files: files.map((f) => ({ name: f.name, type: f.type, size: f.size })),
-    created_at: new Date().toISOString(),
-  }, null, 2);
+    captured_by: "USER",
+    source_type: "SCREENSHOT",
+    meta: {},
+  };
+
+  try {
+    const result = await api("/missions/visual", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    log.textContent = JSON.stringify(result, null, 2);
+
+    const outputs = document.getElementById("finalOutputs");
+    if (outputs.querySelector(".empty")) outputs.innerHTML = "";
+    const item = document.createElement("div");
+    item.className = "folder-item";
+    item.textContent = `ورودی دیداری Backend — ${result.intake?.intake_id || ""} — فایل‌ها: ${files.length}`;
+    outputs.prepend(item);
+  } catch (e) {
+    log.textContent = "خطا در ارسال به Backend:\n" + e.message;
+  }
 }
 
+// init
 renderEmployees();
 fillAgentSelects();
-renderAgentMemory();
+loadSystem();
+refreshAllAgents();
