@@ -1,6 +1,6 @@
 """
 Ramaz X1 Backend - FastAPI
-Version: 1.3.0
+Version: 1.4.0
 """
 
 import sys
@@ -28,7 +28,7 @@ from core.brain_registry import get_agent_brain
 app = FastAPI(
     title="Ramaz X1 API",
     description="Multi-Agent AI Trading Operating System",
-    version="1.3.0",
+    version="1.4.0",
 )
 
 runtime = RuntimeCore()
@@ -91,7 +91,21 @@ class AttachModelRequest(BaseModel):
     provider: str
     model_id: str
     role: str = "primary"
+    api_key_ref: Optional[str] = None
+    set_active: bool = False
     meta: Dict[str, Any] = {}
+
+
+class SwitchModelRequest(BaseModel):
+    agent_id: str
+    model_ref_id: str
+
+
+class ModelHealthRequest(BaseModel):
+    agent_id: str
+    model_ref_id: str
+    error: str = ""
+    error_type: str = "ERROR"  # RATE_LIMITED | QUOTA_EXCEEDED | ERROR
 
 
 class RecallRequest(BaseModel):
@@ -110,9 +124,9 @@ class PromptPackRequest(BaseModel):
 
 class VisualMissionRequest(BaseModel):
     source_note: Optional[str] = None
-    files: List[Dict[str, Any]] = []  # [{name, type, size, data_url?}]
-    captured_by: str = "USER"  # USER | AGENT
-    source_type: str = "SCREENSHOT"  # SCREENSHOT | CHART_CAPTURE | FEED
+    files: List[Dict[str, Any]] = []
+    captured_by: str = "USER"
+    source_type: str = "SCREENSHOT"
     meta: Dict[str, Any] = {}
 
 
@@ -120,7 +134,7 @@ class VisualMissionRequest(BaseModel):
 def root():
     return {
         "system": "Ramaz X1",
-        "version": "1.3.0",
+        "version": "1.4.0",
         "status": runtime.status(),
         "timestamp": datetime.utcnow().isoformat(),
     }
@@ -136,79 +150,75 @@ def list_agents():
     return registry.list_all()
 
 
-@app.get("/agents/{agent_id}")
-def get_agent(agent_id: str):
-    agent = registry.get(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    return agent
-
-
-@app.post("/missions/visual")
-def visual_mission_intake(req: VisualMissionRequest):
-    """Mission intake by screenshot / chart capture / source feed (not text form)."""
-    item = {
-        "intake_id": f"VIS-{uuid.uuid4().hex[:8].upper()}",
-        "source_note": req.source_note,
-        "files": req.files,
-        "captured_by": req.captured_by,
-        "source_type": req.source_type,
-        "meta": req.meta,
-        "created_at": datetime.utcnow().isoformat(),
-        "status": "RECEIVED",
-    }
-    VISUAL_INTAKE.append(item)
-
-    # Optionally create a mission envelope around visual intake
-    mission_id = mission_manager.create(
-        objective=req.source_note or "Visual mission intake",
-        mission_input={
-            "visual_intake_id": item["intake_id"],
-            "source_type": req.source_type,
-            "files": req.files,
-            "meta": req.meta,
-        },
-        success_criteria="Analyze visual intake through organization flow",
-        priority="MEDIUM",
-    )
-    item["mission_id"] = mission_id
-
-    logger.log(
-        mission_id=mission_id,
-        agent_id=None,
-        department=None,
-        event="VISUAL_MISSION_INTAKE",
-        data={"intake_id": item["intake_id"], "files": len(req.files)},
-    )
-
-    return {"status": "RECEIVED", "intake": item}
-
-
-@app.get("/missions/visual")
-def list_visual_intakes():
-    return VISUAL_INTAKE
-
-
 @app.post("/models/attach")
 def attach_model(req: AttachModelRequest):
     if not registry.get(req.agent_id):
         raise HTTPException(status_code=404, detail="Agent not found")
     brain = get_agent_brain(req.agent_id)
-    model = brain.attach_model(
+    model = brain.models.attach_model(
         name=req.name,
         provider=req.provider,
         model_id=req.model_id,
         role=req.role,
+        api_key_ref=req.api_key_ref,
         meta=req.meta,
+        set_active=req.set_active,
     )
-    return {"status": "ATTACHED", "agent_id": req.agent_id, "model": model}
+    return {"status": "ATTACHED", "agent_id": req.agent_id, "model": model, "active": brain.models.get_active()}
 
 
 @app.get("/models/{agent_id}")
 def list_models(agent_id: str):
     if not registry.get(agent_id):
         raise HTTPException(status_code=404, detail="Agent not found")
-    return get_agent_brain(agent_id).list_models()
+    brain = get_agent_brain(agent_id)
+    return {
+        "agent_id": agent_id,
+        "active": brain.models.get_active(),
+        "models": brain.models.list_models(),
+    }
+
+
+@app.post("/models/switch")
+def switch_model(req: SwitchModelRequest):
+    """User switches agent to another attached API/model."""
+    if not registry.get(req.agent_id):
+        raise HTTPException(status_code=404, detail="Agent not found")
+    brain = get_agent_brain(req.agent_id)
+    result = brain.models.switch_model(req.model_ref_id)
+    if result.get("status") == "NOT_FOUND":
+        raise HTTPException(status_code=404, detail="Model not found")
+    if result.get("status") == "DISABLED":
+        raise HTTPException(status_code=400, detail="Model is disabled")
+    return result
+
+
+@app.post("/models/mark-failure")
+def mark_model_failure(req: ModelHealthRequest):
+    """Mark API exhausted / rate-limited / error and allow failover."""
+    if not registry.get(req.agent_id):
+        raise HTTPException(status_code=404, detail="Agent not found")
+    brain = get_agent_brain(req.agent_id)
+    marked = brain.models.mark_failure(req.model_ref_id, error=req.error, error_type=req.error_type)
+    if marked.get("status") == "NOT_FOUND":
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    # try auto failover
+    selected = brain.models.select(allow_failover=True)
+    return {
+        "status": "UPDATED",
+        "marked": marked,
+        "active_after": selected,
+    }
+
+
+@app.post("/models/mark-success")
+def mark_model_success(req: ModelHealthRequest):
+    if not registry.get(req.agent_id):
+        raise HTTPException(status_code=404, detail="Agent not found")
+    brain = get_agent_brain(req.agent_id)
+    brain.models.mark_success(req.model_ref_id)
+    return {"status": "OK", "active": brain.models.get_active()}
 
 
 @app.post("/memory/recall")
@@ -241,12 +251,7 @@ def add_training(req: TrainingRequest):
         meta={"source": req.source, "tags": req.tags},
     )
 
-    return {
-        "status": "STORED",
-        "agent_id": req.agent_id,
-        "training_id": training_id,
-        "rag_units": len(units),
-    }
+    return {"status": "STORED", "agent_id": req.agent_id, "training_id": training_id, "rag_units": len(units)}
 
 
 @app.get("/training/{agent_id}")
@@ -353,6 +358,40 @@ def reject_discovery(req: DiscoveryDecisionRequest):
     return result
 
 
+@app.post("/missions/visual")
+def visual_mission_intake(req: VisualMissionRequest):
+    item = {
+        "intake_id": f"VIS-{uuid.uuid4().hex[:8].upper()}",
+        "source_note": req.source_note,
+        "files": req.files,
+        "captured_by": req.captured_by,
+        "source_type": req.source_type,
+        "meta": req.meta,
+        "created_at": datetime.utcnow().isoformat(),
+        "status": "RECEIVED",
+    }
+    VISUAL_INTAKE.append(item)
+
+    mission_id = mission_manager.create(
+        objective=req.source_note or "Visual mission intake",
+        mission_input={
+            "visual_intake_id": item["intake_id"],
+            "source_type": req.source_type,
+            "files": req.files,
+            "meta": req.meta,
+        },
+        success_criteria="Analyze visual intake through organization flow",
+        priority="MEDIUM",
+    )
+    item["mission_id"] = mission_id
+    return {"status": "RECEIVED", "intake": item}
+
+
+@app.get("/missions/visual")
+def list_visual_intakes():
+    return VISUAL_INTAKE
+
+
 @app.post("/missions/run")
 def run_mission(request: MissionRequest):
     mission_id = mission_manager.create(
@@ -388,15 +427,9 @@ def run_mission(request: MissionRequest):
     }
 
     final_state = flow.run(initial_state)
-    final_status = final_state.get("mission_status", "UNKNOWN")
-    try:
-        mission_manager.update_status(mission_id, MissionStatus[final_status])
-    except Exception:
-        pass
-
     return {
         "mission_id": mission_id,
-        "status": final_status,
+        "status": final_state.get("mission_status", "UNKNOWN"),
         "current_node": final_state.get("current_node"),
         "agent_outputs": final_state.get("agent_outputs", {}),
         "reports": final_state.get("reports", []),
