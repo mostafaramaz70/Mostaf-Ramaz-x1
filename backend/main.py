@@ -1,6 +1,6 @@
 """
 Ramaz X1 Backend - FastAPI
-Version: 1.1.0
+Version: 1.2.0
 """
 
 import sys
@@ -10,7 +10,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
@@ -22,11 +22,12 @@ from runtime.agents_setup import setup_blueprint_agents
 from runtime.flow import MissionFlow
 from runtime.state import MissionStatus
 from backend.memory_store import get_agent_memory
+from core.brain_registry import get_agent_brain
 
 app = FastAPI(
     title="Ramaz X1 API",
     description="Multi-Agent AI Trading Operating System",
-    version="1.1.0"
+    version="1.2.0"
 )
 
 runtime = RuntimeCore()
@@ -82,11 +83,34 @@ class DiscoveryDecisionRequest(BaseModel):
     decided_by: str = "USER"
 
 
+class AttachModelRequest(BaseModel):
+    agent_id: str
+    name: str
+    provider: str
+    model_id: str
+    role: str = "primary"
+    meta: Dict[str, Any] = {}
+
+
+class RecallRequest(BaseModel):
+    agent_id: str
+    query: str
+    top_k: int = 5
+    kinds: Optional[List[str]] = None
+
+
+class PromptPackRequest(BaseModel):
+    agent_id: str
+    task: str
+    query: str
+    top_k: int = 5
+
+
 @app.get("/")
 def root():
     return {
         "system": "Ramaz X1",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "status": runtime.status(),
         "timestamp": datetime.utcnow().isoformat()
     }
@@ -110,9 +134,48 @@ def get_agent(agent_id: str):
     return agent
 
 
+@app.post("/models/attach")
+def attach_model(req: AttachModelRequest):
+    if not registry.get(req.agent_id):
+        raise HTTPException(status_code=404, detail="Agent not found")
+    brain = get_agent_brain(req.agent_id)
+    model = brain.attach_model(
+        name=req.name,
+        provider=req.provider,
+        model_id=req.model_id,
+        role=req.role,
+        meta=req.meta,
+    )
+    return {"status": "ATTACHED", "agent_id": req.agent_id, "model": model}
+
+
+@app.get("/models/{agent_id}")
+def list_models(agent_id: str):
+    if not registry.get(agent_id):
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return get_agent_brain(agent_id).list_models()
+
+
+@app.post("/memory/recall")
+def recall_memory(req: RecallRequest):
+    if not registry.get(req.agent_id):
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return get_agent_brain(req.agent_id).recall(query=req.query, top_k=req.top_k, kinds=req.kinds)
+
+
+@app.post("/memory/prompt-pack")
+def prompt_pack(req: PromptPackRequest):
+    if not registry.get(req.agent_id):
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return get_agent_brain(req.agent_id).build_model_prompt(
+        task=req.task,
+        query=req.query,
+        top_k=req.top_k,
+    )
+
+
 @app.post("/training")
 def add_training(req: TrainingRequest):
-    """User teaches an agent. Stores training only."""
     if not registry.get(req.agent_id):
         raise HTTPException(status_code=404, detail="Agent not found")
 
@@ -123,6 +186,16 @@ def add_training(req: TrainingRequest):
         source=req.source,
         tags=req.tags,
     )
+
+    # index into RAG brain for efficient recall
+    brain = get_agent_brain(req.agent_id)
+    brain.remember_training(
+        title=req.title,
+        content=req.content,
+        source_id=training_id,
+        meta={"source": req.source, "tags": req.tags},
+    )
+
     return {"status": "STORED", "agent_id": req.agent_id, "training_id": training_id}
 
 
@@ -135,7 +208,6 @@ def list_training(agent_id: str):
 
 @app.post("/experience/from-training")
 def promote_training(req: PromoteTrainingRequest):
-    """USER-ONLY: move training to experience after explicit approval."""
     if not registry.get(req.agent_id):
         raise HTTPException(status_code=404, detail="Agent not found")
 
@@ -148,6 +220,20 @@ def promote_training(req: PromoteTrainingRequest):
     )
     if result.get("status") == "NOT_FOUND":
         raise HTTPException(status_code=404, detail="Training not found")
+
+    # index approved experience into RAG brain
+    if result.get("status") == "APPROVED":
+        training_items = mem.get_training()
+        training = next((t for t in training_items if t["id"] == req.training_id), None)
+        if training:
+            brain = get_agent_brain(req.agent_id)
+            brain.remember_experience(
+                title=f"EXP from {training.get('title')}",
+                content=str(training.get("content", "")),
+                source_id=result.get("experience_id"),
+                meta={"approved_by": req.approved_by, "from_training": req.training_id},
+            )
+
     return result
 
 
@@ -160,7 +246,6 @@ def list_experience(agent_id: str):
 
 @app.post("/discoveries/propose")
 def propose_discovery(req: DiscoveryProposeRequest):
-    """Agent proposes discovery. Stays pending until User decides."""
     if not registry.get(req.agent_id):
         raise HTTPException(status_code=404, detail="Agent not found")
 
@@ -170,6 +255,15 @@ def propose_discovery(req: DiscoveryProposeRequest):
         evidence=req.evidence,
         confidence=req.confidence,
     )
+
+    brain = get_agent_brain(req.agent_id)
+    brain.remember_discovery_pending(
+        title=f"Discovery {discovery_id}",
+        content=str(req.content),
+        source_id=discovery_id,
+        meta={"confidence": req.confidence},
+    )
+
     return {
         "status": "PENDING_USER_APPROVAL",
         "agent_id": req.agent_id,
@@ -186,7 +280,6 @@ def pending_discoveries(agent_id: str):
 
 @app.post("/discoveries/approve")
 def approve_discovery(req: DiscoveryDecisionRequest):
-    """USER-ONLY: discovery -> experience."""
     if not registry.get(req.agent_id):
         raise HTTPException(status_code=404, detail="Agent not found")
 
@@ -197,12 +290,23 @@ def approve_discovery(req: DiscoveryDecisionRequest):
     )
     if result.get("status") == "NOT_FOUND":
         raise HTTPException(status_code=404, detail="Discovery not found")
+
+    if result.get("status") == "APPROVED":
+        pending = mem.get_pending_discoveries()
+        # also search all discoveries by id through experience content fallback
+        brain = get_agent_brain(req.agent_id)
+        brain.remember_experience(
+            title=f"Approved discovery {req.discovery_id}",
+            content=f"User-approved discovery {req.discovery_id}",
+            source_id=result.get("experience_id"),
+            meta={"from_discovery": req.discovery_id, "approved_by": req.decided_by},
+        )
+
     return result
 
 
 @app.post("/discoveries/reject")
 def reject_discovery(req: DiscoveryDecisionRequest):
-    """USER-ONLY: reject discovery."""
     if not registry.get(req.agent_id):
         raise HTTPException(status_code=404, detail="Agent not found")
 
@@ -215,18 +319,6 @@ def reject_discovery(req: DiscoveryDecisionRequest):
     if result.get("status") == "NOT_FOUND":
         raise HTTPException(status_code=404, detail="Discovery not found")
     return result
-
-
-@app.post("/missions", response_model=None)
-def create_mission(request: MissionRequest):
-    mission_id = mission_manager.create(
-        objective=request.objective,
-        mission_input=request.mission_input,
-        success_criteria=request.success_criteria,
-        priority=request.priority
-    )
-    logger.log(mission_id=mission_id, agent_id=None, department=None, event="MISSION_CREATED", data={"objective": request.objective})
-    return {"mission_id": mission_id, "status": "CREATED", "message": "Mission created successfully"}
 
 
 @app.post("/missions/run")
@@ -274,8 +366,6 @@ def run_mission(request: MissionRequest):
         "mission_id": mission_id,
         "status": final_status,
         "current_node": final_state.get("current_node"),
-        "active_employees": final_state.get("active_employees", []),
-        "active_managers": final_state.get("active_managers", []),
         "agent_outputs": final_state.get("agent_outputs", {}),
         "reports": final_state.get("reports", []),
         "errors": final_state.get("errors", []),
@@ -286,14 +376,6 @@ def run_mission(request: MissionRequest):
 @app.get("/missions")
 def list_missions():
     return mission_manager.list_missions()
-
-
-@app.get("/missions/{mission_id}")
-def get_mission(mission_id: str):
-    mission = mission_manager.get(mission_id)
-    if not mission:
-        raise HTTPException(status_code=404, detail="Mission not found")
-    return mission
 
 
 @app.get("/logs")
